@@ -70,6 +70,7 @@ class MainWindow(QWidget):
         main_layout.addWidget(splitter)
         outer_layout.addWidget(main_content)
         
+        QShortcut(QKeySequence("Ctrl+T"), self, self._handle_extract_key)
         QShortcut(QKeySequence("Ctrl+N"), self, self.new_idea)
         QShortcut(QKeySequence("Delete"), self, self._handle_del_key)
         QShortcut(QKeySequence("Escape"), self, self._clear_tag_filter)
@@ -523,6 +524,13 @@ class MainWindow(QWidget):
 
     def _handle_del_key(self):
         self._do_destroy() if self.curr_filter[0] == 'trash' else self._do_del()
+
+    def _handle_extract_key(self):
+        """处理 Ctrl+T 快捷键，提取选中笔记的正文"""
+        if self.selected_id:
+            self._extract_single(self.selected_id)
+        else:
+            self._show_tooltip('⚠️ 请先选择一条笔记', 1500)
 
     def show_main_window(self):
         self.show()
