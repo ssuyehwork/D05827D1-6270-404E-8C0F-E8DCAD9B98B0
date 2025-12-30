@@ -7,7 +7,9 @@ from PyQt5.QtGui import QPainter, QRadialGradient, QColor, QFont
 from core.settings import save_setting
 
 class FloatingBall(QWidget):
-    double_clicked = pyqtSignal()
+    request_show_quick_window = pyqtSignal()
+    request_quit_app = pyqtSignal()
+    double_clicked = pyqtSignal() # 保留，以防未来使用
 
     def __init__(self, main_window):
         super().__init__()
@@ -121,15 +123,15 @@ class FloatingBall(QWidget):
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton:
-            # 双击打开主窗口
-            self.mw.show_main_window()
+            # 双击请求显示快速笔记窗口
+            self.request_show_quick_window.emit()
             self.double_clicked.emit()
 
     def contextMenuEvent(self, e):
         m = QMenu(self)
         m.setStyleSheet("background:#2d2d2d;color:white;border:1px solid #333")
-        m.addAction('📖 打开主窗口', self.mw.show_main_window)
-        m.addAction('➕ 新建灵感', self.mw.new_idea)
+        m.addAction('📖 打开快速笔记', self.request_show_quick_window.emit)
+        m.addAction('➕ 新建灵感', self.mw.new_idea) # 这个功能仍然依赖 main_window
         m.addSeparator()
-        m.addAction('❌ 退出', self.mw.quit_app)
+        m.addAction('❌ 退出', self.request_quit_app.emit)
         m.exec_(e.globalPos())
