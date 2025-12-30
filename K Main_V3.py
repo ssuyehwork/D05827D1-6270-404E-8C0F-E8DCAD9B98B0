@@ -41,6 +41,7 @@ class AppManager(QObject):
         # 2. 创建并显示悬浮球
         self.ball = FloatingBall(self.main_window)
         self.ball.request_show_quick_window.connect(self.show_quick_window)
+        self.ball.request_show_main_window.connect(self.show_main_window)
         self.ball.request_quit_app.connect(self.quit_application)
         
         # 恢复悬浮球位置

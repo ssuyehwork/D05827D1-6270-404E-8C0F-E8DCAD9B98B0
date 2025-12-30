@@ -32,6 +32,12 @@ class DatabaseManager:
         if 'is_deleted' not in cols:
             try: c.execute('ALTER TABLE ideas ADD COLUMN is_deleted INTEGER DEFAULT 0')
             except: pass
+        if 'item_type' not in cols:
+            try: c.execute("ALTER TABLE ideas ADD COLUMN item_type TEXT DEFAULT 'text'")
+            except: pass
+        if 'data_blob' not in cols:
+            try: c.execute('ALTER TABLE ideas ADD COLUMN data_blob BLOB')
+            except: pass
             
         self.conn.commit()
 
@@ -53,6 +59,7 @@ class DatabaseManager:
     def _update_tags(self, iid, tags):
         c = self.conn.cursor()
         c.execute('DELETE FROM idea_tags WHERE idea_id=?', (iid,))
+        if not tags: return
         for t in tags:
             t = t.strip()
             if t:
@@ -60,6 +67,29 @@ class DatabaseManager:
                 c.execute('SELECT id FROM tags WHERE name=?', (t,))
                 tid = c.fetchone()[0]
                 c.execute('INSERT INTO idea_tags VALUES (?,?)', (iid, tid))
+
+    def add_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
+        """专门用于剪贴板项目的新接口"""
+        c = self.conn.cursor()
+        
+        # 自动生成标题
+        if item_type == 'text':
+            title = content.strip().split('\n')[0][:50]
+        elif item_type == 'image':
+            title = "[图片]"
+        elif item_type == 'file':
+            # content 在这里是文件路径
+            title = f"[文件] {os.path.basename(content.split(';')[0])}"
+        else:
+            title = "未命名"
+            
+        # 插入数据
+        c.execute(
+            'INSERT INTO ideas (title, content, item_type, data_blob, category_id) VALUES (?,?,?,?,?)',
+            (title, content, item_type, data_blob, category_id)
+        )
+        self.conn.commit()
+        return c.lastrowid
 
     # --- 状态管理 ---
     def toggle_field(self, iid, field):

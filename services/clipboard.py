@@ -2,7 +2,7 @@
 import datetime
 import os
 import uuid
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QBuffer
 from PyQt5.QtGui import QImage
 # from data.db_manager import DatabaseManager # 假设的导入
 
@@ -42,7 +42,7 @@ class ClipboardManager(QObject):
                     current_hash = self._hash_data(content)
                     if current_hash != self._last_hash:
                         print(f"[Clipboard] 捕获到文件: {content}")
-                        # self.db.add_item(item_type='file', content=content, category_id=category_id)
+                        self.db.add_clipboard_item(item_type='file', content=content, category_id=category_id)
                         self._last_hash = current_hash
                         self.data_captured.emit()
                         return # 在此停止处理
@@ -53,9 +53,12 @@ class ClipboardManager(QObject):
                 current_hash = self._hash_data(image)
                 if current_hash != self._last_hash:
                     print("[Clipboard] 捕获到图片。")
-                    # 实际应用中，我们会将图片保存到文件并存储路径，
-                    # 或者直接将 blob 存入数据库。
-                    # self.db.add_item(item_type='image', image_data=image.bits().tobytes(), category_id=category_id)
+                    # 将 QImage 转换为字节数据
+                    buffer = QBuffer()
+                    buffer.open(QBuffer.ReadWrite)
+                    image.save(buffer, "PNG")
+                    image_bytes = buffer.data()
+                    self.db.add_clipboard_item(item_type='image', content='[Image Data]', data_blob=image_bytes, category_id=category_id)
                     self._last_hash = current_hash
                     self.data_captured.emit()
                     return
@@ -66,7 +69,7 @@ class ClipboardManager(QObject):
                 current_hash = self._hash_data(text)
                 if text and current_hash != self._last_hash:
                     print(f"[Clipboard] 捕获到文本: {text[:70]}...")
-                    # self.db.add_item(item_type='text', content=text, category_id=category_id)
+                    self.db.add_clipboard_item(item_type='text', content=text, category_id=category_id)
                     self._last_hash = current_hash
                     self.data_captured.emit()
                     return
