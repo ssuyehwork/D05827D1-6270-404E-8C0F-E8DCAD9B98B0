@@ -14,7 +14,12 @@ class Sidebar(QTreeWidget):
         self.db = db
         self.setHeaderHidden(True)
         self.setIndentation(15)
+        
+        # --- 拖拽设置 ---
+        self.setDragEnabled(True)
         self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(self.InternalMove) # 关键：设置为内部拖拽移动
 
         # 优化样式：极简紧凑布局
         self.setStyleSheet(f"""
@@ -53,8 +58,8 @@ class Sidebar(QTreeWidget):
         # 1. 根节点 (分区组)
         root = QTreeWidgetItem(self, ["分区组"])
         root.setExpanded(True)
-        # Make the root item non-selectable and visually distinct as a header
-        root.setFlags(root.flags() & ~Qt.ItemIsSelectable)
+        # 根节点不可选择，也不可拖拽
+        root.setFlags(root.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsDragEnabled)
         font = root.font(0)
         font.setBold(True)
         root.setFont(0, font)
@@ -72,6 +77,8 @@ class Sidebar(QTreeWidget):
         for name, key, icon in menu_items:
             item = QTreeWidgetItem(root, [f"{icon}  {name} ({counts.get(key, 0)})"])
             item.setData(0, Qt.UserRole, (key, None))
+            # 系统项不可拖拽
+            item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled)
         
         # --- 新增：回收站下方的分割线 ---
         sep_item = QTreeWidgetItem(root)
@@ -106,35 +113,72 @@ class Sidebar(QTreeWidget):
 
     # --- 其余逻辑保持不变 ---
     def dragEnterEvent(self, e):
-        if e.mimeData().hasFormat('application/x-idea-id'): e.accept()
-        else: e.ignore()
+        # 同时接受内部移动和外部笔记拖入
+        if e.mimeData().hasFormat('application/x-tree-widget-internal-move') or \
+           e.mimeData().hasFormat('application/x-idea-id'):
+            e.accept()
+        else:
+            e.ignore()
 
     def dragMoveEvent(self, e):
         item = self.itemAt(e.pos())
         if item:
             d = item.data(0, Qt.UserRole)
+            # 允许拖放到分类、回收站、收藏和未分类
             if d and d[0] in ['category', 'trash', 'favorite', 'uncategorized']:
                 self.setCurrentItem(item)
+                e.accept()
+                return
+            # 如果是内部移动，也允许
+            if e.mimeData().hasFormat('application/x-tree-widget-internal-move'):
                 e.accept()
                 return
         e.ignore()
 
     def dropEvent(self, e):
-        try:
-            iid = int(e.mimeData().data('application/x-idea-id'))
-            item = self.itemAt(e.pos())
-            if not item: return
-            d = item.data(0, Qt.UserRole)
-            if not d: return
-            key, val = d
-            if key == 'category': self.db.move_category(iid, val)
-            elif key == 'uncategorized': self.db.move_category(iid, None)
-            elif key == 'trash': self.db.set_deleted(iid, True)
-            elif key == 'favorite': self.db.set_favorite(iid, True)
-            self.data_changed.emit()
-            self.refresh()
-        except Exception as err:
-            print(f"Drop error: {err}")
+        # 优先判断是否是外部拖入的笔记
+        if e.mimeData().hasFormat('application/x-idea-id'):
+            try:
+                iid = int(e.mimeData().data('application/x-idea-id'))
+                item = self.itemAt(e.pos())
+                if not item: return
+                d = item.data(0, Qt.UserRole)
+                if not d: return
+                key, val = d
+                if key == 'category': self.db.move_category(iid, val)
+                elif key == 'uncategorized': self.db.move_category(iid, None)
+                elif key == 'trash': self.db.set_deleted(iid, True)
+                elif key == 'favorite': self.db.set_favorite(iid, True)
+                self.data_changed.emit()
+                self.refresh()
+                e.acceptProposedAction()
+            except Exception as err:
+                print(f"Drop error: {err}")
+        else:
+            # 如果不是笔记，则认为是内部排序
+            super().dropEvent(e)
+            self._save_current_order()
+
+
+    def _save_current_order(self):
+        """遍历TreeWidget，保存所有自定义分类的顺序"""
+        order_list = []
+        
+        def iterate_items(parent_item):
+            for i in range(parent_item.childCount()):
+                item = parent_item.child(i)
+                data = item.data(0, Qt.UserRole)
+                if data and data[0] == 'category':
+                    cat_id = data[1]
+                    order_list.append((cat_id, i))
+                    if item.childCount() > 0:
+                        iterate_items(item)
+                        
+        # 从 invisibleRootItem 开始遍历，以捕获所有层级的分类
+        iterate_items(self.invisibleRootItem())
+        
+        if order_list:
+            self.db.save_category_order(order_list)
 
     def _on_click(self, item):
         data = item.data(0, Qt.UserRole)

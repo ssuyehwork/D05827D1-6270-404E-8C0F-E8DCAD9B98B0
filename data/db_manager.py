@@ -22,10 +22,17 @@ class DatabaseManager:
             category_id INTEGER, is_deleted INTEGER DEFAULT 0
         )''')
         c.execute('CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)')
-        c.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, parent_id INTEGER, color TEXT DEFAULT "#808080")')
+        c.execute('''CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            name TEXT NOT NULL, 
+            parent_id INTEGER, 
+            color TEXT DEFAULT "#808080",
+            sort_order INTEGER DEFAULT 0
+        )''')
         c.execute('CREATE TABLE IF NOT EXISTS idea_tags (idea_id INTEGER, tag_id INTEGER, PRIMARY KEY (idea_id, tag_id))')
         
         # 2. 检查迁移
+        # 迁移 ideas 表
         c.execute("PRAGMA table_info(ideas)")
         cols = [i[1] for i in c.fetchall()]
         if 'category_id' not in cols:
@@ -45,6 +52,15 @@ class DatabaseManager:
                 c.execute('ALTER TABLE ideas ADD COLUMN content_hash TEXT')
                 c.execute('CREATE INDEX IF NOT EXISTS idx_content_hash ON ideas(content_hash)')
             except: pass
+        
+        # 迁移 categories 表
+        c.execute("PRAGMA table_info(categories)")
+        cat_cols = [i[1] for i in c.fetchall()]
+        if 'sort_order' not in cat_cols:
+            try:
+                c.execute('ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 0')
+            except:
+                pass
             
         self.conn.commit()
 
@@ -190,11 +206,20 @@ class DatabaseManager:
     # --- 统计与分类 ---
     def get_categories(self):
         c = self.conn.cursor()
-        c.execute('SELECT * FROM categories ORDER BY name')
+        c.execute('SELECT * FROM categories ORDER BY sort_order ASC, name ASC')
         return c.fetchall()
 
     def add_category(self, name, parent_id=None):
-        self.conn.cursor().execute('INSERT INTO categories (name, parent_id) VALUES (?, ?)', (name, parent_id))
+        c = self.conn.cursor()
+        # 查找当前父级下最大的 sort_order
+        if parent_id is None:
+            c.execute("SELECT MAX(sort_order) FROM categories WHERE parent_id IS NULL")
+        else:
+            c.execute("SELECT MAX(sort_order) FROM categories WHERE parent_id = ?", (parent_id,))
+        max_order = c.fetchone()[0]
+        new_order = (max_order or 0) + 1
+        
+        c.execute('INSERT INTO categories (name, parent_id, sort_order) VALUES (?, ?, ?)', (name, parent_id, new_order))
         self.conn.commit()
 
     def rename_category(self, cat_id, new_name):
@@ -238,15 +263,16 @@ class DatabaseManager:
     def get_partitions_tree(self):
         """查询并构建一个层级的分类树"""
         class Partition:
-            def __init__(self, id, name, color, parent_id):
+            def __init__(self, id, name, color, parent_id, sort_order):
                 self.id = id
                 self.name = name
                 self.color = color
                 self.parent_id = parent_id
+                self.sort_order = sort_order
                 self.children = []
 
         c = self.conn.cursor()
-        c.execute("SELECT id, name, color, parent_id FROM categories ORDER BY name")
+        c.execute("SELECT id, name, color, parent_id, sort_order FROM categories ORDER BY sort_order ASC, name ASC")
         
         # 使用字典来快速查找节点
         nodes = {row[0]: Partition(*row) for row in c.fetchall()}
@@ -282,3 +308,21 @@ class DatabaseManager:
                 counts['partitions'][cat_id] = count
 
         return counts
+    
+    def save_category_order(self, order_list):
+        """
+        保存分类的新顺序。
+        :param order_list: 一个元组列表,每个元组为 (category_id, new_sort_order)
+        """
+        c = self.conn.cursor()
+        try:
+            c.execute("BEGIN TRANSACTION")
+            for cat_id, order in order_list:
+                c.execute("UPDATE categories SET sort_order = ? WHERE id = ?", (order, cat_id))
+            c.execute("COMMIT")
+            print(f"[DEBUG] 分类顺序已保存: {order_list}")
+        except Exception as e:
+            c.execute("ROLLBACK")
+            print(f"[ERROR] 保存分类顺序失败: {e}")
+        finally:
+            self.conn.commit()

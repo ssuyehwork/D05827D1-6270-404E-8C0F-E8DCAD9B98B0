@@ -346,51 +346,42 @@ class MainWindow(QWidget):
             e.accept()
 
     def mouseMoveEvent(self, e):
-        if e.buttons() == Qt.NoButton:
-            # 没有按下按钮，只是移动鼠标
-            areas = self._get_resize_area(e.pos())
-            self._set_cursor_for_resize(areas)
-            e.accept()
-            return
-        
+        # 仅当左键按下时，才处理拖动或调整大小的逻辑
         if e.buttons() == Qt.LeftButton:
             if self._resize_area:
                 # 调整窗口大小
                 delta = e.globalPos() - self._resize_start_pos
                 rect = self._resize_start_geometry
-                
-                min_width = 600
-                min_height = 400
-                
+                min_width, min_height = 600, 400
                 new_rect = rect.adjusted(0, 0, 0, 0)
-                
+
                 if 'left' in self._resize_area:
                     new_left = rect.left() + delta.x()
-                    if rect.right() - new_left >= min_width:
-                        new_rect.setLeft(new_left)
-                
+                    if rect.right() - new_left >= min_width: new_rect.setLeft(new_left)
                 if 'right' in self._resize_area:
                     new_width = rect.width() + delta.x()
-                    if new_width >= min_width:
-                        new_rect.setWidth(new_width)
-                
+                    if new_width >= min_width: new_rect.setWidth(new_width)
                 if 'top' in self._resize_area:
                     new_top = rect.top() + delta.y()
-                    if rect.bottom() - new_top >= min_height:
-                        new_rect.setTop(new_top)
-                
+                    if rect.bottom() - new_top >= min_height: new_rect.setTop(new_top)
                 if 'bottom' in self._resize_area:
                     new_height = rect.height() + delta.y()
-                    if new_height >= min_height:
-                        new_rect.setHeight(new_height)
+                    if new_height >= min_height: new_rect.setHeight(new_height)
                 
                 self.setGeometry(new_rect)
                 e.accept()
-            
+                return
+
             elif self._drag_pos:
                 # 拖动窗口
                 self.move(e.globalPos() - self._drag_pos)
                 e.accept()
+                return
+
+        # 如果没有拖动或调整大小的操作（包括鼠标未按下时），则更新光标样式
+        areas = self._get_resize_area(e.pos())
+        self._set_cursor_for_resize(areas)
+        e.accept()
 
     def mouseReleaseEvent(self, e):
         self._drag_pos = None
