@@ -10,7 +10,7 @@ class ClipboardManager(QObject):
     """
     管理剪贴板数据，处理数据并将其存入数据库。
     """
-    data_captured = pyqtSignal()
+    data_captured = pyqtSignal(int)
 
     def __init__(self, db_manager):
         super().__init__()
@@ -42,9 +42,10 @@ class ClipboardManager(QObject):
                     current_hash = self._hash_data(content)
                     if current_hash != self._last_hash:
                         print(f"[Clipboard] 捕获到文件: {content}")
-                        self.db.add_clipboard_item(item_type='file', content=content, category_id=category_id)
+                        idea_id = self.db.add_clipboard_item(item_type='file', content=content, category_id=category_id)
                         self._last_hash = current_hash
-                        self.data_captured.emit()
+                        if idea_id:
+                            self.data_captured.emit(idea_id)
                         return # 在此停止处理
 
             # 处理图片
@@ -58,9 +59,10 @@ class ClipboardManager(QObject):
                     buffer.open(QBuffer.ReadWrite)
                     image.save(buffer, "PNG")
                     image_bytes = buffer.data()
-                    self.db.add_clipboard_item(item_type='image', content='[Image Data]', data_blob=image_bytes, category_id=category_id)
+                    idea_id = self.db.add_clipboard_item(item_type='image', content='[Image Data]', data_blob=image_bytes, category_id=category_id)
                     self._last_hash = current_hash
-                    self.data_captured.emit()
+                    if idea_id:
+                        self.data_captured.emit(idea_id)
                     return
 
             # 处理文本 (如果不是文件路径)
@@ -69,9 +71,10 @@ class ClipboardManager(QObject):
                 current_hash = self._hash_data(text)
                 if text and current_hash != self._last_hash:
                     print(f"[Clipboard] 捕获到文本: {text[:70]}...")
-                    self.db.add_clipboard_item(item_type='text', content=text, category_id=category_id)
+                    idea_id = self.db.add_clipboard_item(item_type='text', content=text, category_id=category_id)
                     self._last_hash = current_hash
-                    self.data_captured.emit()
+                    if idea_id:
+                        self.data_captured.emit(idea_id)
                     return
 
         except Exception as e:

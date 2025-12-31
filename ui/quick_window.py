@@ -68,6 +68,7 @@ def log(message):
 try:
     from data.db_manager import DatabaseManager as DBManager
     from services.clipboard import ClipboardManager
+    from ui.dialogs import TagSuggestionDialog
 except ImportError:
     class DBManager:
         def get_items(self, **kwargs): return []
@@ -171,7 +172,7 @@ class QuickWindow(QWidget):
         self.cm = ClipboardManager(self.db)
         self.clipboard = QApplication.clipboard()
         self.clipboard.dataChanged.connect(self.on_clipboard_changed)
-        self.cm.data_captured.connect(self._update_list)
+        self.cm.data_captured.connect(self._on_data_captured)
         self._processing_clipboard = False
         
         self._init_ui()
@@ -694,4 +695,19 @@ class QuickWindow(QWidget):
                 self.list_widget.setFocus()
                 QApplication.sendEvent(self.list_widget, event)
         else: super().keyPressEvent(event)
+
+
+    def _on_data_captured(self, idea_id):
+        """当剪贴板捕获到新数据时调用"""
+        self._update_list()  # 首先刷新列表
+        
+        # 弹出标签建议对话框
+        dialog = TagSuggestionDialog(self.db, idea_id, self)
+        dialog.data_updated.connect(self._update_all_views)
+        dialog.show_at_cursor()
+
+    def _update_all_views(self):
+        """刷新所有相关的UI视图"""
+        self._update_list()
+        self._update_partition_tree()
 

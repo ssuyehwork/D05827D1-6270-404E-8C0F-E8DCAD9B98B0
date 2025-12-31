@@ -130,7 +130,7 @@ class DatabaseManager:
             # 内容不存在，创建新记录
             # 自动生成标题
             if item_type == 'text':
-                title = content.strip().split('\n')[0][:50]
+                title = content.strip().split('\\n')[0][:50]
             elif item_type == 'image':
                 title = "[图片]"
             elif item_type == 'file':
@@ -207,7 +207,8 @@ class DatabaseManager:
         elif f_type == 'favorite': q += ' AND i.is_favorite=1'
         
         if search:
-            q += ' AND (i.title LIKE ? OR i.content LIKE ? OR t.name LIKE ?)'
+            # 修复: COALESCE(t.name, '') 确保即使没有标签的笔记也能在其他字段匹配时被搜到
+            q += ' AND (i.title LIKE ? OR i.content LIKE ? OR COALESCE(t.name, \'\') LIKE ?)'
             p.extend([f'%{search}%']*3)
             
         # 【修改】排序逻辑
@@ -249,6 +250,17 @@ class DatabaseManager:
         c = self.conn.cursor()
         c.execute('UPDATE categories SET name=? WHERE id=?', (new_name, cat_id))
         self.conn.commit()
+
+    def get_or_create_category_by_name(self, name):
+        """根据名称查找分类,如果不存在则创建"""
+        c = self.conn.cursor()
+        c.execute('SELECT id FROM categories WHERE name=?', (name,))
+        result = c.fetchone()
+        if result:
+            return result['id']
+        else:
+            self.add_category(name)
+            return c.lastrowid
 
     def delete_category(self, cid):
         c = self.conn.cursor()

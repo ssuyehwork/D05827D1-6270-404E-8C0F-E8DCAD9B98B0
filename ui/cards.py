@@ -16,7 +16,7 @@ class IdeaCard(QFrame):
         
         self.data = data
         self.db = db
-        self.id = data['id']
+        self.id = data[0]
         self.setCursor(Qt.PointingHandCursor)
         
         # --- 状态变量 ---
@@ -35,7 +35,7 @@ class IdeaCard(QFrame):
         top.setSpacing(8)
         
         # 标题
-        title = QLabel(self.data['title'])
+        title = QLabel(self.data[1])
         title.setStyleSheet("font-size:15px; font-weight:bold; background:transparent; color:white;")
         title.setWordWrap(False) # 标题单行显示，超出显示省略号
         # 设置标题的 Elide 模式需要更复杂的处理，这里暂用样式表控制或默认行为
@@ -44,11 +44,11 @@ class IdeaCard(QFrame):
         # 图标区域 (置顶/收藏)
         icon_layout = QHBoxLayout()
         icon_layout.setSpacing(4)
-        if self.data['is_pinned']:
+        if self.data[4]:  # is_pinned
             pin_icon = QLabel('📌')
             pin_icon.setStyleSheet("background:transparent; font-size:12px;")
             icon_layout.addWidget(pin_icon)
-        if self.data['is_favorite']:
+        if self.data[5]:  # is_favorite
             fav_icon = QLabel('⭐')
             fav_icon.setStyleSheet("background:transparent; font-size:12px;")
             icon_layout.addWidget(fav_icon)
@@ -57,8 +57,8 @@ class IdeaCard(QFrame):
         layout.addLayout(top)
         
         # --- 中部：内容预览 ---
-        if self.data['content']:
-            content_str = self.data['content'].strip()
+        if self.data[2]:
+            content_str = self.data[2].strip()
             
             # 【修复逻辑】不再暴力截断第一行，而是获取一段较长的文本，让 Label 自动换行
             # 将换行符替换为空格，以便在卡片中连续显示
@@ -76,8 +76,6 @@ class IdeaCard(QFrame):
             """)
             content.setWordWrap(True) # 允许自动换行
             content.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-            # 限制高度，大概显示 3 行文字的高度
-            content.setMaximumHeight(65) 
             layout.addWidget(content)
             
         # --- 底部：时间 + 标签 ---
@@ -85,7 +83,7 @@ class IdeaCard(QFrame):
         bot.setSpacing(6)
         
         # 时间
-        time_str = self.data['updated_at'][:16] # YYYY-MM-DD HH:mm
+        time_str = self.data[7][:16] # YYYY-MM-DD HH:mm
         time_label = QLabel(f'{time_str}')
         time_label.setStyleSheet("color:rgba(255,255,255,100); font-size:11px; background:transparent;")
         bot.addWidget(time_label)
@@ -124,11 +122,7 @@ class IdeaCard(QFrame):
         self.update_selection(False)
 
     def update_selection(self, selected):
-        bg_color = self.data['color']
-
-        # 如果数据来自剪贴板，则使用深灰色背景
-        if self.data['source'] == 'clipboard':
-            bg_color = '#333333'  # A dark grey color
+        bg_color = self.data[3]
         
         # 基础样式
         base_style = f"""

@@ -4,8 +4,8 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QGridLayout, QHBoxLayout,
                               QProgressBar, QFrame, QApplication, QMessageBox, QShortcut,
                              QSpacerItem, QSizePolicy, QSplitter, QWidget, QScrollBar,
                              QGraphicsDropShadowEffect)
-from PyQt5.QtGui import QKeySequence, QColor
-from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QKeySequence, QColor, QCursor
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from core.config import STYLES, COLORS
 from .components.rich_text_edit import RichTextEdit
 
@@ -462,3 +462,83 @@ class PreviewDialog(QDialog):
     def mousePressEvent(self, event):
         # 点击任何地方都关闭
         self.close()
+class TagSuggestionDialog(QDialog):
+    """一个用于快速添加标签和分类的浮动提示框"""
+    data_updated = pyqtSignal()
+
+    def __init__(self, db_manager, idea_id, parent=None):
+        super().__init__(parent)
+        self.db = db_manager
+        self.idea_id = idea_id
+        
+        self.setWindowFlags(
+            Qt.WindowStaysOnTopHint | 
+            Qt.Tool | 
+            Qt.FramelessWindowHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating) # 不抢焦点
+        
+        self._init_ui()
+        
+        # 5秒后自动关闭
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.close)
+        self.timer.start(5000)
+
+    def _init_ui(self):
+        self.setStyleSheet("""
+            QDialog {
+                background-color: rgba(30, 30, 30, 0.9);
+                border: 1px solid #444;
+                border-radius: 8px;
+            }
+            QPushButton {
+                background-color: #333;
+                color: #ddd;
+                border: 1px solid #555;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #4a90e2;
+                color: white;
+                border-color: #4a90e2;
+            }
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        
+        learn_btn = QPushButton("学习")
+        learn_btn.clicked.connect(lambda: self._on_select("学习"))
+        
+        prompt_btn = QPushButton("提示词")
+        prompt_btn.clicked.connect(lambda: self._on_select("提示词"))
+        
+        layout.addWidget(learn_btn)
+        layout.addWidget(prompt_btn)
+
+    def _on_select(self, name):
+        # 1. 添加标签
+        current_tags = self.db.get_tags(self.idea_id)
+        if name not in current_tags:
+            current_tags.append(name)
+            self.db._update_tags(self.idea_id, current_tags) # 使用 _update_tags
+
+        # 2. 移动到分类
+        category_id = self.db.get_or_create_category_by_name(name)
+        self.db.move_category(self.idea_id, category_id)
+        
+        self.data_updated.emit()
+        self.close()
+
+    def show_at_cursor(self):
+        pos = QCursor.pos()
+        # 将窗口定位在鼠标指针上方
+        self.move(pos.x() - self.width() // 2, pos.y() - self.height() - 20)
+        self.show()
+
