@@ -555,7 +555,7 @@ class MainWindow(QWidget):
             c = IdeaCard(d, self.db)
 
             c.selection_requested.connect(self._handle_selection_request)
-            # print(f"[DEBUG] 卡片 ID={d[0]} selection_requested 信号连接完成")
+            c.deletion_requested.connect(self._handle_card_deletion) # 新增连接
             
             c.double_clicked.connect(self._extract_single)
             # print(f"[DEBUG] 卡片 ID={d[0]} double_clicked 信号连接到 _extract_single")
@@ -704,6 +704,20 @@ class MainWindow(QWidget):
             for iid in self.selected_ids:
                 self.db.toggle_field(iid, 'is_favorite')
             self._refresh_all()
+
+    def _handle_card_deletion(self, idea_id):
+        """处理卡片拖拽删除请求"""
+        print(f"[DEBUG] 收到卡片删除请求, ID={idea_id}")
+        # 如果被删除的卡片在当前的选择集中，也一并移除
+        if idea_id in self.selected_ids:
+            self.selected_ids.remove(idea_id)
+        
+        # 将数据移入回收站
+        self.db.set_deleted(idea_id, True)
+        
+        # 刷新界面
+        self._refresh_all()
+        self._show_tooltip('✅ 已移至回收站', 1500)
 
     def _do_del(self):
         if self.selected_ids:

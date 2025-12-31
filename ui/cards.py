@@ -2,13 +2,14 @@
 # ui/cards.py
 import sys
 from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QApplication
-from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
-from PyQt5.QtGui import QDrag
+from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QPropertyAnimation, QEasingCurve
+from PyQt5.QtGui import QDrag, QColor
 from core.config import STYLES
 
 class IdeaCard(QFrame):
     selection_requested = pyqtSignal(int, bool)
     double_clicked = pyqtSignal(int)
+    deletion_requested = pyqtSignal(int) # 新增信号
 
     def __init__(self, data, db, parent=None):
         super().__init__(parent)
@@ -21,7 +22,11 @@ class IdeaCard(QFrame):
         
         # --- 状态变量 ---
         self._drag_start_pos = None
-        self._is_potential_click = False
+        self._original_pos = None
+        self._is_selected = False
+        
+        # --- 动画 ---
+        self.animation = QPropertyAnimation(self, b"pos")
         
         self._init_ui()
 
@@ -122,6 +127,7 @@ class IdeaCard(QFrame):
         self.update_selection(False)
 
     def update_selection(self, selected):
+        self._is_selected = selected # 保存选中状态
         bg_color = self.data[3]
         
         # 基础样式
@@ -166,41 +172,86 @@ class IdeaCard(QFrame):
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self._drag_start_pos = e.pos()
-            self._is_potential_click = True
+            self.animation.stop() # 停止所有正在进行的动画
+            self._drag_start_pos = e.globalPos()
+            self._original_pos = self.pos()
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
-        if not (e.buttons() & Qt.LeftButton) or not self._drag_start_pos:
-            return
+        if e.buttons() & Qt.LeftButton and self._drag_start_pos:
+            delta = e.globalPos() - self._drag_start_pos
+            delta_x = delta.x()
+
+            # 只允许向右拖动
+            if delta_x < 0:
+                delta_x = 0
+            
+            self.move(self._original_pos.x() + delta_x, self._original_pos.y())
+            self._update_drag_style(delta_x)
         
-        if (e.pos() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
-            return
-        
-        # 拖拽开始，取消点击判定
-        self._is_potential_click = False
-        
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setData('application/x-idea-id', str(self.id).encode())
-        drag.setMimeData(mime)
-        
-        pixmap = self.grab().scaledToWidth(200, Qt.SmoothTransformation)
-        drag.setPixmap(pixmap)
-        drag.setHotSpot(e.pos())
-        
-        drag.exec_(Qt.MoveAction)
+        super().mouseMoveEvent(e)
         
     def mouseReleaseEvent(self, e):
-        if self._is_potential_click and e.button() == Qt.LeftButton:
-            is_ctrl_pressed = QApplication.keyboardModifiers() == Qt.ControlModifier
-            self.selection_requested.emit(self.id, is_ctrl_pressed)
+        if e.button() == Qt.LeftButton and self._drag_start_pos:
+            delta_x = e.globalPos().x() - self._drag_start_pos.x()
+            
+            # 恢复原始样式
+            self.update_selection(self._is_selected)
 
-        self._drag_start_pos = None
-        self._is_potential_click = False
+            # 检查是否为简单点击
+            if (e.globalPos() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
+                is_ctrl_pressed = QApplication.keyboardModifiers() == Qt.ControlModifier
+                self.selection_requested.emit(self.id, is_ctrl_pressed)
+            elif delta_x > 100:
+                self.deletion_requested.emit(self.id)
+                # 主窗口将处理实际删除和此小部件的移除
+            else:
+                # 动画弹回原位
+                if self.pos() != self._original_pos:
+                    self.animation.setEndValue(self._original_pos)
+                    self.animation.setDuration(300)
+                    self.animation.setEasingCurve(QEasingCurve.OutCubic)
+                    self.animation.start()
+
+            self._drag_start_pos = None
+            self._original_pos = None
+            
         super().mouseReleaseEvent(e)
 
     def mouseDoubleClickEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.double_clicked.emit(self.id)
         super().mouseDoubleClickEvent(e)
+        
+    def _update_drag_style(self, offset):
+        """根据拖拽偏移量更新背景颜色以提供视觉反馈"""
+        # 将偏移量 (0-100+) 映射到一个强度值 (0.0-1.0)
+        intensity = min(offset / 100.0, 1.0)
+        
+        bg_color = self.data[3]
+        orig_qcolor = QColor(bg_color if bg_color else "#4a90e2") # 提供一个默认颜色
+        
+        # 目标红色
+        target_r, target_g, target_b = 220, 50, 50 
+        
+        r = int(orig_qcolor.red() * (1 - intensity) + target_r * intensity)
+        g = int(orig_qcolor.green() * (1 - intensity) + target_g * intensity)
+        b = int(orig_qcolor.blue() * (1 - intensity) + target_b * intensity)
+
+        drag_bg_color = f"rgb({r}, {g}, {b})"
+        
+        border_style = "border: 2px solid white;" if self._is_selected else "border: 1px solid rgba(255,255,255,0.1);"
+
+        final_style = f"""
+            IdeaCard {{
+                background-color: {drag_bg_color};
+                {STYLES['card_base']}
+                padding: 0px;
+                {border_style}
+            }}
+            QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """
+        self.setStyleSheet(final_style)
