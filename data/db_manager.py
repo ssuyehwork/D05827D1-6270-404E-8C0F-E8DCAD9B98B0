@@ -147,6 +147,7 @@ class DatabaseManager:
         c.execute(sql, tuple(idea_ids))
         return [r[0] for r in c.fetchall()]
 
+    # 【核心修改】增加 is_new 返回值
     def add_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         c = self.conn.cursor()
         hasher = hashlib.sha256()
@@ -163,7 +164,8 @@ class DatabaseManager:
             idea_id = existing_idea[0]
             c.execute("UPDATE ideas SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (idea_id,))
             self.conn.commit()
-            return idea_id
+            # 返回 False 表示是旧数据
+            return idea_id, False 
         else:
             if item_type == 'text':
                 title = content.strip().split('\n')[0][:50]
@@ -180,9 +182,11 @@ class DatabaseManager:
                 (title, content, item_type, data_blob, category_id, content_hash, default_color)
             )
             idea_id = c.lastrowid
+            
             self._update_tags(idea_id, ["剪贴板"])
             self.conn.commit()
-            return idea_id
+            # 返回 True 表示是新数据
+            return idea_id, True
 
     def toggle_field(self, iid, field):
         c = self.conn.cursor()
@@ -229,13 +233,11 @@ class DatabaseManager:
             c.execute('SELECT id, title, content, color, is_pinned, is_favorite, created_at, updated_at, category_id, item_type FROM ideas WHERE id=?', (iid,))
         return c.fetchone()
 
-    # 【核心修改】支持分页查询
     def get_ideas(self, search, f_type, f_val, page=None, page_size=20):
         c = self.conn.cursor()
         q = "SELECT DISTINCT i.* FROM ideas i LEFT JOIN idea_tags it ON i.id=it.idea_id LEFT JOIN tags t ON it.tag_id=t.id WHERE 1=1"
         p = []
         
-        # 1. 构建过滤条件 (与下面的 count 方法逻辑必须一致)
         if f_type == 'trash': q += ' AND i.is_deleted=1'
         else: q += ' AND (i.is_deleted=0 OR i.is_deleted IS NULL)'
         
@@ -251,13 +253,11 @@ class DatabaseManager:
             q += ' AND (i.title LIKE ? OR i.content LIKE ? OR t.name LIKE ?)'
             p.extend([f'%{search}%']*3)
             
-        # 2. 排序
         if f_type == 'trash':
             q += ' ORDER BY i.updated_at DESC'
         else:
             q += ' ORDER BY i.is_pinned DESC, i.updated_at DESC'
             
-        # 3. 分页 (如果传入了 page)
         if page is not None and page_size is not None:
             limit = page_size
             offset = (page - 1) * page_size
@@ -267,7 +267,6 @@ class DatabaseManager:
         c.execute(q, p)
         return c.fetchall()
 
-    # 【新增】获取符合条件的总记录数 (用于计算总页数)
     def get_ideas_count(self, search, f_type, f_val):
         c = self.conn.cursor()
         q = "SELECT COUNT(DISTINCT i.id) FROM ideas i LEFT JOIN idea_tags it ON i.id=it.idea_id LEFT JOIN tags t ON it.tag_id=t.id WHERE 1=1"
@@ -443,7 +442,6 @@ class DatabaseManager:
         finally:
             self.conn.commit()
 
-    # --- 标签管理 ---
     def rename_tag(self, old_name, new_name):
         new_name = new_name.strip()
         if not new_name or old_name == new_name: return

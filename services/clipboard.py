@@ -6,12 +6,12 @@ import uuid
 import hashlib
 from PyQt5.QtCore import QObject, pyqtSignal, QBuffer
 from PyQt5.QtGui import QImage
+from PyQt5.QtWidgets import QApplication
 
 class ClipboardManager(QObject):
     """
     管理剪贴板数据，处理数据并将其存入数据库。
     """
-    # 【核心修改】信号携带参数：新增数据的 ID
     data_captured = pyqtSignal(int)
 
     def __init__(self, db_manager):
@@ -22,17 +22,21 @@ class ClipboardManager(QObject):
     def _hash_data(self, data):
         """为数据创建一个简单的哈希值以检查重复。"""
         if isinstance(data, QImage):
-            # 对图片，哈希其原始字节数据
             return hash(data.bits().tobytes())
-        # 对于字符串，先编码
         return hashlib.md5(str(data).encode('utf-8')).hexdigest()
 
     def process_clipboard(self, mime_data, category_id=None):
         """
         处理来自剪贴板的 MIME 数据。
         """
+        # 1. 屏蔽内部操作
+        if QApplication.activeWindow() is not None:
+            return
+
+        extra_tags = set() # 用于收集智能分析的标签
+
         try:
-            # 优先处理 URL (文件路径)
+            # --- 优先处理 文件/文件夹 ---
             if mime_data.hasUrls():
                 urls = mime_data.urls()
                 filepaths = [url.toLocalFile() for url in urls if url.isLocalFile()]
@@ -41,21 +45,34 @@ class ClipboardManager(QObject):
                     content = ";".join(filepaths)
                     current_hash = self._hash_data(content)
                     
-                    # 即使哈希相同，如果是文件操作可能也需要记录，这里保持去重逻辑
                     if current_hash != self._last_hash:
-                        print(f"[Clipboard] 捕获到文件: {content}")
-                        # 获取返回的 idea_id
-                        idea_id = self.db.add_clipboard_item(item_type='file', content=content, category_id=category_id)
+                        print(f"[Clipboard] 捕获到文件/文件夹: {content}")
+                        
+                        # 【智能打标逻辑：文件与文件夹】
+                        for path in filepaths:
+                            if os.path.isdir(path):
+                                extra_tags.add("文件夹")
+                            elif os.path.isfile(path):
+                                # 提取扩展名，转小写，去点
+                                ext = os.path.splitext(path)[1].lower().lstrip('.')
+                                if ext:
+                                    extra_tags.add(ext)
+
+                        result = self.db.add_clipboard_item(item_type='file', content=content, category_id=category_id)
                         self._last_hash = current_hash
-                        # 【核心修改】发射带有 ID 的信号
-                        if idea_id:
-                            self.data_captured.emit(idea_id)
+                        
+                        if result:
+                            idea_id, is_new = result
+                            if is_new:
+                                # 【应用智能标签】
+                                if extra_tags:
+                                    self.db.add_tags_to_multiple_ideas([idea_id], list(extra_tags))
+                                self.data_captured.emit(idea_id)
                         return
 
-            # 处理图片
+            # --- 处理图片 ---
             if mime_data.hasImage():
                 image = mime_data.imageData()
-                # 注意：QImage 直接哈希可能不稳定，这里简化处理，实际项目建议转换后哈希
                 buffer = QBuffer()
                 buffer.open(QBuffer.ReadWrite)
                 image.save(buffer, "PNG")
@@ -65,13 +82,16 @@ class ClipboardManager(QObject):
                 
                 if current_hash != self._last_hash:
                     print("[Clipboard] 捕获到图片。")
-                    idea_id = self.db.add_clipboard_item(item_type='image', content='[Image Data]', data_blob=image_bytes, category_id=category_id)
+                    result = self.db.add_clipboard_item(item_type='image', content='[Image Data]', data_blob=image_bytes, category_id=category_id)
                     self._last_hash = current_hash
-                    if idea_id:
-                        self.data_captured.emit(idea_id)
+                    
+                    if result:
+                        idea_id, is_new = result
+                        if is_new:
+                            self.data_captured.emit(idea_id)
                     return
 
-            # 处理文本
+            # --- 处理文本 (含网址识别) ---
             if mime_data.hasText():
                 text = mime_data.text()
                 if not text.strip(): return
@@ -79,10 +99,23 @@ class ClipboardManager(QObject):
                 current_hash = self._hash_data(text)
                 if current_hash != self._last_hash:
                     print(f"[Clipboard] 捕获到文本: {text[:30]}...")
-                    idea_id = self.db.add_clipboard_item(item_type='text', content=text, category_id=category_id)
+                    
+                    # 【智能打标逻辑：网址】
+                    stripped_text = text.strip()
+                    if stripped_text.startswith(('http://', 'https://')):
+                        extra_tags.add("网址")
+                        extra_tags.add("链接")
+                    
+                    result = self.db.add_clipboard_item(item_type='text', content=text, category_id=category_id)
                     self._last_hash = current_hash
-                    if idea_id:
-                        self.data_captured.emit(idea_id)
+                    
+                    if result:
+                        idea_id, is_new = result
+                        if is_new:
+                            # 【应用智能标签】
+                            if extra_tags:
+                                self.db.add_tags_to_multiple_ideas([idea_id], list(extra_tags))
+                            self.data_captured.emit(idea_id)
                     return
 
         except Exception as e:
