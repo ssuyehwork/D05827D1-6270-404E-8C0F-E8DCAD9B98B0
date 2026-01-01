@@ -7,13 +7,12 @@ from core.enums import FilterType
 class IdeaRepository:
     def __init__(self, conn):
         self.conn = conn
-        self.conn.row_factory = sqlite3.Row
 
-    def add(self, title, content, color, category_id=None, item_type='text', data_blob=None, content_hash=None, source=None):
+    def add(self, title, content, color, category_id=None, item_type='text', data_blob=None, content_hash=None):
         c = self.conn.cursor()
         c.execute(
-            'INSERT INTO ideas (title, content, color, category_id, item_type, data_blob, content_hash, source) VALUES (?,?,?,?,?,?,?,?)',
-            (title, content, color, category_id, item_type, data_blob, content_hash, source)
+            'INSERT INTO ideas (title, content, color, category_id, item_type, data_blob, content_hash) VALUES (?,?,?,?,?,?,?)',
+            (title, content, color, category_id, item_type, data_blob, content_hash)
         )
         self.conn.commit()
         return c.lastrowid

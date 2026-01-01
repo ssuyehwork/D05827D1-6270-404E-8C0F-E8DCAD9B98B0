@@ -33,10 +33,10 @@ class SchemaMigration:
             logger.info("数据库迁移到 v1")
         
         # Add future migrations here
-        if current_version < 2:
-            SchemaMigration._migrate_to_v2(conn)
-            SchemaMigration._set_db_version(conn, 2)
-            logger.info("数据库迁移到 v2")
+        # if current_version < 2:
+        #     SchemaMigration._migrate_to_v2(conn)
+        #     SchemaMigration._set_db_version(conn, 2)
+        #     logger.info("数据库迁移到 v2")
             
         logger.info("数据库结构检查完成。")
 
@@ -92,18 +92,4 @@ class SchemaMigration:
             try: c.execute('ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 0')
             except: pass
             
-        conn.commit()
-
-    @staticmethod
-    def _migrate_to_v2(conn):
-        c = conn.cursor()
-        logger.info("v2 迁移: 为 ideas 表添加 source 列...")
-        try:
-            c.execute('ALTER TABLE ideas ADD COLUMN source TEXT')
-        except sqlite3.OperationalError as e:
-            # 如果列已存在，忽略错误
-            if "duplicate column name" in str(e):
-                logger.warning("列 'source' 已存在，跳过添加。")
-            else:
-                raise e
         conn.commit()

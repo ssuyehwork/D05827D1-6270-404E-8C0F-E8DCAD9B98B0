@@ -65,12 +65,11 @@ class ClipboardService(QObject):
             idea_id = self.idea_repo.add(
                 title=title,
                 content=content,
-                color='#696969', # Use dark gray for clipboard items
+                color=None, # Use default color
                 category_id=category_id,
                 item_type=item_type,
                 data_blob=data_blob,
-                content_hash=content_hash,
-                source='clipboard'
+                content_hash=content_hash
             )
             
             # Automatically add "剪贴板" tag
