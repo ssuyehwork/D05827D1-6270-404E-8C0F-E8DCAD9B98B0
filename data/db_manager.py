@@ -3,7 +3,7 @@
 import sqlite3
 import hashlib
 import os
-import random  # 【新增】引入随机模块
+import random
 from core.config import DB_NAME, COLORS
 
 class DatabaseManager:
@@ -57,10 +57,11 @@ class DatabaseManager:
         c.execute("PRAGMA table_info(categories)")
         cat_cols = [i[1] for i in c.fetchall()]
         if 'sort_order' not in cat_cols:
-            try:
-                c.execute('ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 0')
-            except:
-                pass
+            try: c.execute('ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 0')
+            except: pass
+        if 'preset_tags' not in cat_cols:
+            try: c.execute('ALTER TABLE categories ADD COLUMN preset_tags TEXT')
+            except: pass
             
         self.conn.commit()
 
@@ -89,6 +90,7 @@ class DatabaseManager:
         self.conn.commit()
 
     def _update_tags(self, iid, tags):
+        """完全替换标签（先删后加）"""
         c = self.conn.cursor()
         c.execute('DELETE FROM idea_tags WHERE idea_id=?', (iid,))
         if not tags: return
@@ -100,10 +102,69 @@ class DatabaseManager:
                 tid = c.fetchone()[0]
                 c.execute('INSERT INTO idea_tags VALUES (?,?)', (iid, tid))
 
+    def _append_tags(self, iid, tags):
+        """追加标签（不删除旧标签）"""
+        c = self.conn.cursor()
+        for t in tags:
+            t = t.strip()
+            if t:
+                c.execute('INSERT OR IGNORE INTO tags (name) VALUES (?)', (t,))
+                c.execute('SELECT id FROM tags WHERE name=?', (t,))
+                tid = c.fetchone()[0]
+                c.execute('INSERT OR IGNORE INTO idea_tags VALUES (?,?)', (iid, tid))
+
+    # --- 批量标签操作 (新增) ---
+    def add_tags_to_multiple_ideas(self, idea_ids, tags_list):
+        """给多个 ID 批量添加标签"""
+        if not idea_ids or not tags_list: return
+        c = self.conn.cursor()
+        for tag_name in tags_list:
+            tag_name = tag_name.strip()
+            if not tag_name: continue
+            
+            c.execute('INSERT OR IGNORE INTO tags (name) VALUES (?)', (tag_name,))
+            c.execute('SELECT id FROM tags WHERE name=?', (tag_name,))
+            tid = c.fetchone()[0]
+            
+            # 为每个 idea_id 插入关联
+            for iid in idea_ids:
+                c.execute('INSERT OR IGNORE INTO idea_tags (idea_id, tag_id) VALUES (?,?)', (iid, tid))
+        self.conn.commit()
+
+    def remove_tag_from_multiple_ideas(self, idea_ids, tag_name):
+        """从多个 ID 中移除指定标签"""
+        if not idea_ids or not tag_name: return
+        c = self.conn.cursor()
+        c.execute('SELECT id FROM tags WHERE name=?', (tag_name,))
+        res = c.fetchone()
+        if not res: return
+        tid = res[0]
+        
+        # 批量删除
+        placeholders = ','.join('?' * len(idea_ids))
+        sql = f'DELETE FROM idea_tags WHERE tag_id=? AND idea_id IN ({placeholders})'
+        c.execute(sql, (tid, *idea_ids))
+        self.conn.commit()
+
+    def get_union_tags(self, idea_ids):
+        """获取这些 ID 拥有的所有标签（并集）"""
+        if not idea_ids: return []
+        c = self.conn.cursor()
+        placeholders = ','.join('?' * len(idea_ids))
+        sql = f'''
+            SELECT DISTINCT t.name 
+            FROM tags t 
+            JOIN idea_tags it ON t.id = it.tag_id 
+            WHERE it.idea_id IN ({placeholders})
+            ORDER BY t.name ASC
+        '''
+        c.execute(sql, tuple(idea_ids))
+        return [r[0] for r in c.fetchall()]
+
+    # ---------------------------
+
     def add_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         c = self.conn.cursor()
-
-        # 1. 计算哈希值
         hasher = hashlib.sha256()
         if item_type == 'text' or item_type == 'file':
             hasher.update(content.encode('utf-8'))
@@ -111,7 +172,6 @@ class DatabaseManager:
             hasher.update(data_blob)
         content_hash = hasher.hexdigest()
 
-        # 2. 检查内容是否已存在
         c.execute("SELECT id FROM ideas WHERE content_hash = ?", (content_hash,))
         existing_idea = c.fetchone()
 
@@ -119,7 +179,6 @@ class DatabaseManager:
             idea_id = existing_idea[0]
             c.execute("UPDATE ideas SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (idea_id,))
             self.conn.commit()
-            print(f"[DEBUG] 内容已存在，更新时间戳，ID={idea_id}")
             return idea_id
         else:
             if item_type == 'text':
@@ -139,12 +198,9 @@ class DatabaseManager:
             idea_id = c.lastrowid
             
             self._update_tags(idea_id, ["剪贴板"])
-            
             self.conn.commit()
-            print(f"[DEBUG] 新增剪贴板内容，ID={idea_id}, 颜色={default_color}")
             return idea_id
 
-    # --- 状态管理 ---
     def toggle_field(self, iid, field):
         c = self.conn.cursor()
         c.execute(f'UPDATE ideas SET {field} = NOT {field} WHERE id=?', (iid,))
@@ -164,12 +220,17 @@ class DatabaseManager:
         c = self.conn.cursor()
         c.execute('UPDATE ideas SET category_id=? WHERE id=?', (cat_id, iid))
         if cat_id is not None:
-            c.execute('SELECT color FROM categories WHERE id=?', (cat_id,))
+            c.execute('SELECT color, preset_tags FROM categories WHERE id=?', (cat_id,))
             result = c.fetchone()
-            if result and result[0]:
+            if result:
                 cat_color = result[0]
-                c.execute('UPDATE ideas SET color=? WHERE id=?', (cat_color, iid))
-                print(f"[DEBUG] ID={iid} 移动到分类 {cat_id}，颜色更新为 {cat_color}")
+                preset_tags_str = result[1]
+                if cat_color:
+                    c.execute('UPDATE ideas SET color=? WHERE id=?', (cat_color, iid))
+                if preset_tags_str:
+                    tags_list = [t.strip() for t in preset_tags_str.split(',') if t.strip()]
+                    if tags_list:
+                        self._append_tags(iid, tags_list)
         self.conn.commit()
 
     def delete_permanent(self, iid):
@@ -177,7 +238,6 @@ class DatabaseManager:
         c.execute('DELETE FROM ideas WHERE id=?', (iid,))
         self.conn.commit()
 
-    # --- 查询 ---
     def get_idea(self, iid, include_blob=False):
         c = self.conn.cursor()
         if include_blob:
@@ -219,19 +279,13 @@ class DatabaseManager:
         c.execute('SELECT t.name FROM tags t JOIN idea_tags it ON t.id=it.tag_id WHERE it.idea_id=?', (iid,))
         return [r[0] for r in c.fetchall()]
 
-    # --- 统计与分类 ---
     def get_categories(self):
         c = self.conn.cursor()
         c.execute('SELECT * FROM categories ORDER BY sort_order ASC, name ASC')
         return c.fetchall()
 
     def add_category(self, name, parent_id=None):
-        """
-        添加新分类，自动分配随机颜色。
-        """
         c = self.conn.cursor()
-        
-        # 1. 计算排序顺序
         if parent_id is None:
             c.execute("SELECT MAX(sort_order) FROM categories WHERE parent_id IS NULL")
         else:
@@ -239,8 +293,6 @@ class DatabaseManager:
         max_order = c.fetchone()[0]
         new_order = (max_order or 0) + 1
         
-        # 2. 【核心修改】随机生成颜色
-        # 预设一组好看的分类颜色 (避免过暗或过淡)
         palette = [
             '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD',
             '#D4A5A5', '#9B59B6', '#3498DB', '#E67E22', '#2ECC71',
@@ -248,13 +300,11 @@ class DatabaseManager:
         ]
         chosen_color = random.choice(palette)
         
-        # 3. 插入数据库 (显式插入 color 字段)
         c.execute(
             'INSERT INTO categories (name, parent_id, sort_order, color) VALUES (?, ?, ?, ?)', 
             (name, parent_id, new_order, chosen_color)
         )
         self.conn.commit()
-        print(f"[DEBUG] 新建分类 '{name}'，自动分配颜色: {chosen_color}")
 
     def rename_category(self, cat_id, new_name):
         c = self.conn.cursor()
@@ -264,6 +314,26 @@ class DatabaseManager:
     def set_category_color(self, cat_id, color):
         c = self.conn.cursor()
         c.execute('UPDATE categories SET color=? WHERE id=?', (color, cat_id))
+        self.conn.commit()
+
+    def set_category_preset_tags(self, cat_id, tags_str):
+        c = self.conn.cursor()
+        c.execute('UPDATE categories SET preset_tags=? WHERE id=?', (tags_str, cat_id))
+        self.conn.commit()
+
+    def get_category_preset_tags(self, cat_id):
+        c = self.conn.cursor()
+        c.execute('SELECT preset_tags FROM categories WHERE id=?', (cat_id,))
+        res = c.fetchone()
+        return res[0] if res else ""
+
+    def apply_preset_tags_to_category_items(self, cat_id, tags_list):
+        if not tags_list: return
+        c = self.conn.cursor()
+        c.execute('SELECT id FROM ideas WHERE category_id=? AND is_deleted=0', (cat_id,))
+        items = c.fetchall()
+        for (iid,) in items:
+            self._append_tags(iid, tags_list)
         self.conn.commit()
 
     def delete_category(self, cid):

@@ -23,8 +23,6 @@ class FloatingBall(QWidget):
 
         self.dragging = False
         self.is_hovering = False 
-        self.is_clipboard_active = False  # 新增：剪贴板反馈状态
-        self.clipboard_timer_count = 0     # 新增：剪贴板特效持续时间计数
         self.offset = QPoint()
         self.hue = 0  # 色相 (0-359)
 
@@ -41,35 +39,16 @@ class FloatingBall(QWidget):
         self.timer.timeout.connect(self._update_physics)
         self.timer.start(16) # ~60FPS
 
-    def trigger_clipboard_feedback(self):
-        """公共方法：触发剪贴板成功反馈特效"""
-        self.is_clipboard_active = True
-        self.clipboard_timer_count = 0  # 重置计数器，特效持续约2秒 (120帧)
-
     def _update_physics(self):
         """物理帧更新"""
         # 1. 色相更新 (彩虹呼吸效果)
         self.hue = (self.hue + 0.5) % 360
 
-        # 2. 剪贴板特效计时
-        if self.is_clipboard_active:
-            self.clipboard_timer_count += 1
-            if self.clipboard_timer_count > 120:  # 2秒后关闭特效
-                self.is_clipboard_active = False
-                self.clipboard_timer_count = 0
-
-        # 3. 目标速度控制 (惯性平滑处理)
-        # 优先级：拖拽悬停 > 剪贴板反馈 > 正常状态
-        if self.is_hovering:
-            target_speed = 15.0
-        elif self.is_clipboard_active:
-            target_speed = 15.0
-        else:
-            target_speed = 2.0
-            
+        # 2. 目标速度控制 (惯性平滑处理)
+        target_speed = 15.0 if self.is_hovering else 2.0
         self.current_speed += (target_speed - self.current_speed) * 0.1
         
-        # 4. 更新角度
+        # 3. 更新角度
         self.angle_outer += self.current_speed
         self.angle_inner -= self.current_speed * 1.5 # 内环反向旋转
         
@@ -77,11 +56,9 @@ class FloatingBall(QWidget):
         self.angle_outer %= 360
         self.angle_inner %= 360
 
-        # 5. 粒子更新
-        if self.is_hovering or self.is_clipboard_active:
+        # 4. 粒子更新
+        if self.is_hovering:
             self._update_particles()
-        else:
-            self.particles = []  # 清空粒子
             
         self.update()
 
@@ -108,19 +85,14 @@ class FloatingBall(QWidget):
         
         # === 赛博配色 (Cyber Palette) ===
         if self.is_hovering:
-            # 拖拽悬停状态: 金/橙
+            # 高能状态: 金/橙
             main_color = QColor(255, 215, 0)      # Gold
             glow_color = QColor(255, 69, 0, 150)  # Orange Glow
-            bg_color = QColor(20, 0, 0, 200)
-        elif self.is_clipboard_active:
-            # 剪贴板成功状态: 紫/青
-            main_color = QColor(138, 43, 226)     # Purple (BlueViolet)
-            glow_color = QColor(0, 255, 255, 150) # Cyan Glow
-            bg_color = QColor(15, 0, 30, 200)     # 深紫背景
+            bg_color = QColor(20, 0, 0, 200)      
         else:
             # 常态: 彩虹呼吸
             main_color = QColor.fromHsvF(self.hue / 360.0, 0.9, 1.0)
-            glow_color = QColor.fromHsvF(self.hue / 360.0, 0.7, 1.0, 0.4)
+            glow_color = QColor.fromHsvF(self.hue / 360.0, 0.7, 1.0, 0.4) # Alpha=100/255
             bg_color = QColor(0, 15, 30, 180)
 
         # 1. 绘制核心背景
@@ -129,10 +101,8 @@ class FloatingBall(QWidget):
         p.drawEllipse(4, 4, 56, 56)
 
         # 2. 绘制粒子流
-        if self.is_hovering or self.is_clipboard_active:
-            # 剪贴板状态使用青色粒子，拖拽状态使用白色粒子
-            particle_color = QColor(0, 255, 255, 180) if self.is_clipboard_active else QColor(255, 255, 255, 180)
-            p.setPen(QPen(particle_color, 1.5))
+        if self.is_hovering:
+            p.setPen(QPen(QColor(255, 255, 255, 180), 1.5))
             for pt in self.particles:
                 px = cx + math.cos(pt['a']) * pt['d']
                 py = cy + math.sin(pt['a']) * pt['d']
@@ -147,22 +117,26 @@ class FloatingBall(QWidget):
         
         rect_outer = QRectF(6, 6, 52, 52)
         start_angle = int(self.angle_outer * 16)
+        # 1度 = 16 units
         p.drawArc(rect_outer, start_angle, 16 * 60)          # 60度长弧
         p.drawArc(rect_outer, start_angle + 16*120, 16 * 30) # 30度短弧
         p.drawArc(rect_outer, start_angle + 16*200, 16 * 100)# 100度大弧
 
-        # 4. 绘制内环 (三段对称，模拟机械锁扣)
+        # 4. 绘制内环 (三段对称，模拟机械锁扣) -- [这里是修改后的部分]
         pen_inner = QPen(main_color)
-        pen_inner.setWidth(2)
-        pen_inner.setCapStyle(Qt.FlatCap)
+        pen_inner.setWidth(2) # 稍微细一点，但比之前清晰
+        pen_inner.setCapStyle(Qt.FlatCap) # 内环用平头，更有机械感
         p.setPen(pen_inner)
         
         rect_inner = QRectF(14, 14, 36, 36)
         start_angle_in = int(self.angle_inner * 16)
         
         # 绘制三个均匀分布的弧 (每个80度，间隔40度)
+        # 0度偏移
         p.drawArc(rect_inner, start_angle_in, 16 * 80)
+        # 120度偏移
         p.drawArc(rect_inner, start_angle_in + 16 * 120, 16 * 80)
+        # 240度偏移
         p.drawArc(rect_inner, start_angle_in + 16 * 240, 16 * 80)
 
         # 5. 绘制中心闪电图标

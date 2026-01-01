@@ -4,8 +4,8 @@ import sys
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QLineEdit,
                                QPushButton, QLabel, QScrollArea, QShortcut, QMessageBox,
                                QApplication, QToolTip, QMenu, QFrame, QTextEdit, QDialog,
-                               QGraphicsDropShadowEffect)
-from PyQt5.QtCore import Qt, QTimer, QPoint, pyqtSignal
+                               QGraphicsDropShadowEffect, QLayout, QSizePolicy)
+from PyQt5.QtCore import Qt, QTimer, QPoint, pyqtSignal, QRect, QSize
 from PyQt5.QtGui import QKeySequence, QCursor, QColor
 from core.config import STYLES, COLORS
 from core.settings import load_setting
@@ -19,45 +19,119 @@ from ui.advanced_tag_selector import AdvancedTagSelector
 from ui.components.search_line_edit import SearchLineEdit
 from services.preview_service import PreviewService
 
+# --- 辅助类：流式布局 ---
+class FlowLayout(QLayout):
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super(FlowLayout, self).__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self.itemList = []
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self.itemList.append(item)
+
+    def count(self):
+        return len(self.itemList)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self.itemList):
+            return self.itemList[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self.itemList):
+            return self.itemList.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        height = self.doLayout(QRect(0, 0, width, 0), True)
+        return height
+
+    def setGeometry(self, rect):
+        super(FlowLayout, self).setGeometry(rect)
+        self.doLayout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self.itemList:
+            size = size.expandedTo(item.minimumSize())
+        margin = self.contentsMargins()
+        size += QSize(margin.left() + margin.right(), margin.top() + margin.bottom())
+        return size
+
+    def doLayout(self, rect, testOnly):
+        x = rect.x()
+        y = rect.y()
+        lineHeight = 0
+        spacing = self.spacing()
+
+        for item in self.itemList:
+            wid = item.widget()
+            spaceX = spacing + wid.style().layoutSpacing(QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Horizontal)
+            spaceY = spacing + wid.style().layoutSpacing(QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Vertical)
+            
+            nextX = x + item.sizeHint().width() + spaceX
+            if nextX - spaceX > rect.right() and lineHeight > 0:
+                x = rect.x()
+                y = y + lineHeight + spaceY
+                nextX = x + item.sizeHint().width() + spaceX
+                lineHeight = 0
+
+            if not testOnly:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = nextX
+            lineHeight = max(lineHeight, item.sizeHint().height())
+
+        return y + lineHeight - rect.y()
+
 class ContentContainer(QWidget):
     cleared = pyqtSignal()
 
     def mousePressEvent(self, e):
-        # 当点击事件发生在自身，而不是子控件(卡片)上时，发射信号
-        # 这意味着点击了卡片之间的空白处
         if self.childAt(e.pos()) is None:
             self.cleared.emit()
         super().mousePressEvent(e)
 
+# 可双击的输入框
+class ClickableLineEdit(QLineEdit):
+    doubleClicked = pyqtSignal()
+    def mouseDoubleClickEvent(self, event):
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
+
 class MainWindow(QWidget):
     closing = pyqtSignal()
-    
-    # 调整大小的边距
     RESIZE_MARGIN = 8
 
     def __init__(self):
         super().__init__()
         print("[DEBUG] ========== MainWindow 初始化开始 ==========")
-        
-        # 【核心修复】防止最后一个窗口（如编辑窗口）关闭时导致整个程序退出
-        # 因为主窗口可能处于隐藏状态，悬浮球是 Tool 类型不计入主窗口
         QApplication.setQuitOnLastWindowClosed(False)
-        
         self.db = DatabaseManager()
-        
-        # 初始化预览服务
         self.preview_service = PreviewService(self.db, self)
         
         self.curr_filter = ('all', None)
         self.selected_ids = set()
         self._drag_pos = None
         self.current_tag_filter = None
-        
-        # 多选辅助变量
         self.last_clicked_id = None 
         self.card_ordered_ids = []  
-        
-        # 调整大小相关变量
         self._resize_area = None
         self._resize_start_pos = None
         self._resize_start_geometry = None
@@ -68,24 +142,20 @@ class MainWindow(QWidget):
         
         self._setup_ui()
         self._load_data()
-        
         print("[DEBUG] MainWindow 初始化完成")
 
     def _setup_ui(self):
         self.setWindowTitle('数据管理')
         self.resize(1300, 700)
         
-        # 主布局，留出阴影空间
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(12, 12, 12, 12)
         
-        # 主容器
         self.container = QWidget()
         self.container.setObjectName("MainContainer")
         self.container.setStyleSheet(STYLES['main_window'])
         root_layout.addWidget(self.container)
         
-        # 添加现代化阴影
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(25)
         shadow.setXOffset(0)
@@ -135,29 +205,23 @@ class MainWindow(QWidget):
         QShortcut(QKeySequence("Delete"), self, self._handle_del_key)
         QShortcut(QKeySequence("Escape"), self, self._clear_tag_filter)
         
-        # 使用 WindowShortcut 上下文绑定空格键
         self.space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
         self.space_shortcut.setContext(Qt.WindowShortcut)
         self.space_shortcut.activated.connect(lambda: self.preview_service.toggle_preview(self.selected_ids))
 
     def _select_all(self):
-        """全选当前视图中的所有卡片"""
         if not self.cards: return
-        # 如果已经全选，则取消全选
         if len(self.selected_ids) == len(self.cards):
             self.selected_ids.clear()
         else:
             self.selected_ids = set(self.cards.keys())
-        
         self._update_all_card_selections()
         self._update_ui_state()
 
     def _clear_all_selections(self):
-        """清除所有选中项（点击空白处时调用）"""
-        if not self.selected_ids:
-            return
+        if not self.selected_ids: return
         self.selected_ids.clear()
-        self.last_clicked_id = None # 清除选区锚点
+        self.last_clicked_id = None
         self._update_all_card_selections()
         self._update_ui_state()
 
@@ -180,34 +244,25 @@ class MainWindow(QWidget):
         self.search.setFixedWidth(280)
         self.search.setFixedHeight(28)
         self.search.setStyleSheet(STYLES['input'] + """
-            QLineEdit { 
-                border-radius: 14px; 
-                padding-right: 25px;
-            }
-            QLineEdit::clear-button {
-                image: url(assets/clear.png);
-                subcontrol-position: right;
-                subcontrol-origin: margin;
-                margin-right: 5px;
-            }
+            QLineEdit { border-radius: 14px; padding-right: 25px; }
+            QLineEdit::clear-button { image: url(assets/clear.png); subcontrol-position: right; margin-right: 5px; }
         """)
         self.search.textChanged.connect(self._load_data)
         self.search.returnPressed.connect(self._add_search_to_history)
         layout.addWidget(self.search)
         layout.addStretch()
         
-        func_btn_style = f"QPushButton {{ background-color: {COLORS['primary']}; border: none; color: white; border-radius: 6px; font-size: 18px; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; }} QPushButton:hover {{ background-color: #357abd; }}"
         ctrl_btn_style = f"QPushButton {{ background-color: transparent; border: none; color: #aaa; border-radius: 6px; font-size: 16px; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; }} QPushButton:hover {{ background-color: rgba(255,255,255,0.1); color: white; }}"
         
         extract_btn = QPushButton('📤')
         extract_btn.setToolTip('批量提取全部')
-        extract_btn.setStyleSheet(func_btn_style)
+        extract_btn.setStyleSheet(f"QPushButton {{ background-color: {COLORS['primary']}; border: none; color: white; border-radius: 6px; font-size: 18px; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; }} QPushButton:hover {{ background-color: #357abd; }}")
         extract_btn.clicked.connect(self._extract_all)
         layout.addWidget(extract_btn)
         
         new_btn = QPushButton('➕')
         new_btn.setToolTip('新建灵感 (Ctrl+N)')
-        new_btn.setStyleSheet(func_btn_style)
+        new_btn.setStyleSheet(f"QPushButton {{ background-color: {COLORS['primary']}; border: none; color: white; border-radius: 6px; font-size: 18px; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; }} QPushButton:hover {{ background-color: #357abd; }}")
         new_btn.clicked.connect(self.new_idea)
         layout.addWidget(new_btn)
         layout.addSpacing(4)
@@ -250,15 +305,10 @@ class MainWindow(QWidget):
         act_bar.addStretch()
         
         self.btns = {}
-        tooltips = {
-            'pin': '置顶 (Ctrl+P)', 'fav': '收藏 (Ctrl+E)', 'edit': '编辑 (Ctrl+B)',
-            'del': '删除 (Delete)', 'rest': '恢复', 'dest': '永久删除'
-        }
         for k, i, f in [('pin','📌',self._do_pin), ('fav','⭐',self._do_fav), ('edit','✏️',self._do_edit),
                         ('del','🗑️',self._do_del), ('rest','♻️',self._do_restore), ('dest','❌',self._do_destroy)]:
             b = QPushButton(i)
             b.setStyleSheet(STYLES['btn_icon'])
-            b.setToolTip(tooltips.get(k, ''))
             b.clicked.connect(f)
             b.setEnabled(False)
             act_bar.addWidget(b)
@@ -281,17 +331,19 @@ class MainWindow(QWidget):
 
     def _create_tag_panel(self):
         panel = QWidget()
-        panel.setStyleSheet(f"QWidget {{ background-color: {COLORS['bg_mid']}; border-left: 1px solid {COLORS['bg_light']}; }}")
+        panel.setObjectName("RightPanel")
+        panel.setStyleSheet(f"#RightPanel {{ background-color: {COLORS['bg_mid']}; }}")
         panel.setFixedWidth(220)
         
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
         
+        # 1. 标题区
         header = QHBoxLayout()
-        title = QLabel('🏷️ 标签')
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #4a90e2;")
-        header.addWidget(title)
+        self.tag_panel_title = QLabel('🏷️ 最近标签')
+        self.tag_panel_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #4a90e2;")
+        header.addWidget(self.tag_panel_title)
         
         self.clear_tag_btn = QPushButton('✕')
         self.clear_tag_btn.setFixedSize(20, 20)
@@ -302,20 +354,48 @@ class MainWindow(QWidget):
         header.addWidget(self.clear_tag_btn)
         layout.addLayout(header)
         
+        # 2. 顶部输入框
+        self.tag_input = ClickableLineEdit()
+        self.tag_input.setPlaceholderText("🔍 搜索...")
+        self.tag_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: #333337; 
+                border: 1px solid #444;
+                border-radius: 16px; /* 全圆角胶囊 */
+                padding: 6px 12px; 
+                font-size: 12px; 
+                color: #EEE;
+            }}
+            QLineEdit:focus {{ 
+                border-color: {COLORS['primary']}; 
+                background-color: #38383C;
+            }}
+        """)
+        self.tag_input.returnPressed.connect(self._handle_tag_input_return)
+        self.tag_input.doubleClicked.connect(self._open_tag_selector_for_selection)
+        layout.addWidget(self.tag_input)
+        
+        # 3. 分割线 (恢复)
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet(f"background-color: {COLORS['bg_light']}; max-height: 1px;")
+        line.setFrameShadow(QFrame.Plain)
+        line.setStyleSheet(f"background-color: {COLORS['bg_light']}; max-height: 1px; margin-top: 5px; margin-bottom: 5px;")
         layout.addWidget(line)
         
+        # 4. 标签列表区域
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none;")
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QWidget { background: transparent; }
+            QScrollBar:vertical {
+                border: none; background: #222; width: 6px; margin: 0;
+            }
+            QScrollBar::handle:vertical { background: #555; border-radius: 3px; }
+        """)
         
         self.tag_list_widget = QWidget()
-        self.tag_list_layout = QVBoxLayout(self.tag_list_widget)
-        self.tag_list_layout.setAlignment(Qt.AlignTop)
-        self.tag_list_layout.setSpacing(6)
-        self.tag_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.tag_list_layout = FlowLayout(self.tag_list_widget, margin=0, spacing=8)
         
         scroll.setWidget(self.tag_list_widget)
         layout.addWidget(scroll)
@@ -323,29 +403,137 @@ class MainWindow(QWidget):
         self._refresh_tag_panel()
         return panel
 
+    def _handle_tag_input_return(self):
+        text = self.tag_input.text().strip()
+        if not text: return
+        
+        if self.selected_ids:
+            self._add_tag_to_selection([text])
+            self.tag_input.clear()
+        else:
+            self._refresh_tag_panel()
+
+    def _open_tag_selector_for_selection(self):
+        if self.selected_ids:
+            selector = AdvancedTagSelector(self.db, idea_id=None, initial_tags=[])
+            selector.tags_confirmed.connect(self._add_tag_to_selection)
+            selector.show_at_cursor()
+
+    def _add_tag_to_selection(self, tags):
+        if not self.selected_ids or not tags: return
+        self.db.add_tags_to_multiple_ideas(list(self.selected_ids), tags)
+        self._show_tooltip(f"✅ 已添加 {len(tags)} 个标签到 {len(self.selected_ids)} 项")
+        self._refresh_all()
+
+    def _remove_tag_from_selection(self, tag_name):
+        if not self.selected_ids: return
+        self.db.remove_tag_from_multiple_ideas(list(self.selected_ids), tag_name)
+        self._refresh_all()
+
     def _refresh_tag_panel(self):
         while self.tag_list_layout.count():
             item = self.tag_list_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        
-        c = self.db.conn.cursor()
-        c.execute('SELECT t.name, COUNT(it.idea_id) as cnt FROM tags t JOIN idea_tags it ON t.id = it.tag_id JOIN ideas i ON it.idea_id = i.id WHERE i.is_deleted = 0 GROUP BY t.id ORDER BY cnt DESC, t.name ASC')
-        tags = c.fetchall()
-        
-        if not tags:
-            empty = QLabel('暂无标签')
-            empty.setStyleSheet("color: #666; font-style: italic; font-size: 12px;")
-            empty.setAlignment(Qt.AlignCenter)
-            self.tag_list_layout.addWidget(empty)
-            return
             
-        for tag_name, count in tags:
-            is_active = (self.current_tag_filter == tag_name)
-            btn = QPushButton(f'#{tag_name} ({count})')
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet(f"QPushButton {{ background-color: {'#4a90e2' if is_active else 'rgba(74,144,226,0.15)'}; border: 1px solid {'#4a90e2' if is_active else 'rgba(74,144,226,0.3)'}; border-radius: 12px; padding: 6px 12px; text-align: left; color: {'white' if is_active else '#4a90e2'}; font-size: 12px; font-weight: {'bold' if is_active else 'normal'}; }} QPushButton:hover {{ background-color: #4a90e2; color: white; }}")
-            btn.clicked.connect(lambda _, t=tag_name: self._filter_by_tag(t))
-            self.tag_list_layout.addWidget(btn)
+        if self.selected_ids:
+            self.tag_panel_title.setText(f"🖊️ 标签管理 ({len(self.selected_ids)})")
+            self.tag_input.setPlaceholderText("输入添加... (双击更多)")
+            self.clear_tag_btn.hide()
+            
+            tags = self.db.get_union_tags(list(self.selected_ids))
+            
+            if not tags:
+                lbl = QLabel("无标签")
+                lbl.setStyleSheet("color:#666; font-style:italic; margin-top:10px;")
+                lbl.setAlignment(Qt.AlignCenter)
+                self.tag_list_layout.addItem(self.tag_list_layout.takeAt(0)) 
+                self.tag_list_widget.layout().addWidget(lbl)
+            else:
+                for tag_name in tags:
+                    btn = QPushButton(f"{tag_name}  ✕")
+                    btn.setCursor(Qt.PointingHandCursor)
+                    btn.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: #383838;
+                            color: #DDD;
+                            border: 1px solid #4D4D4D;
+                            border-radius: 14px;
+                            padding: 5px 12px;
+                            text-align: center;
+                            font-size: 12px;
+                            font-family: "Segoe UI", "Microsoft YaHei";
+                        }}
+                        QPushButton:hover {{
+                            background-color: {COLORS['danger']};
+                            border-color: {COLORS['danger']};
+                            color: white;
+                        }}
+                    """)
+                    btn.clicked.connect(lambda _, t=tag_name: self._remove_tag_from_selection(t))
+                    self.tag_list_layout.addWidget(btn)
+                    
+        else:
+            self.tag_panel_title.setText("🏷️ 最近标签")
+            self.tag_input.setPlaceholderText("🔍 搜索...")
+            if self.current_tag_filter:
+                self.clear_tag_btn.show()
+            else:
+                self.clear_tag_btn.hide()
+                
+            c = self.db.conn.cursor()
+            search_term = self.tag_input.text().strip()
+            sql = '''
+                SELECT t.name, COUNT(it.idea_id) as cnt, MAX(i.updated_at) as last_used
+                FROM tags t 
+                JOIN idea_tags it ON t.id = it.tag_id 
+                JOIN ideas i ON it.idea_id = i.id 
+                WHERE i.is_deleted = 0 
+            '''
+            params = []
+            if search_term:
+                sql += " AND t.name LIKE ?"
+                params.append(f"%{search_term}%")
+            
+            sql += ' GROUP BY t.id ORDER BY last_used DESC, cnt DESC, t.name ASC'
+            
+            c.execute(sql, params)
+            tags = c.fetchall()
+            
+            if not tags:
+                return
+                
+            for row in tags:
+                tag_name = row[0]
+                count = row[1]
+                is_active = (self.current_tag_filter == tag_name)
+                icon = "✓" if is_active else "🕒"
+                
+                btn = QPushButton(f'{icon} {tag_name}')
+                btn.setCursor(Qt.PointingHandCursor)
+                
+                bg_color = COLORS['primary'] if is_active else '#333333'
+                border_color = COLORS['primary'] if is_active else '#444444'
+                text_color = 'white' if is_active else '#CCCCCC'
+                
+                btn.setStyleSheet(f"""
+                    QPushButton {{ 
+                        background-color: {bg_color}; 
+                        border: 1px solid {border_color}; 
+                        border-radius: 14px; 
+                        padding: 5px 12px; 
+                        text-align: center; 
+                        color: {text_color}; 
+                        font-size: 12px;
+                        font-family: "Segoe UI", "Microsoft YaHei";
+                    }} 
+                    QPushButton:hover {{ 
+                        background-color: {COLORS['primary']};
+                        border-color: {COLORS['primary']}; 
+                        color: white; 
+                    }}
+                """)
+                btn.clicked.connect(lambda _, t=tag_name: self._filter_by_tag(t))
+                self.tag_list_layout.addWidget(btn)
 
     def _filter_by_tag(self, tag_name):
         if self.current_tag_filter == tag_name:
@@ -367,7 +555,6 @@ class MainWindow(QWidget):
 
     # ==================== 调整大小逻辑 ====================
     def _get_resize_area(self, pos):
-        """检测鼠标是否在边缘调整区域"""
         x, y = pos.x(), pos.y()
         w, h = self.width(), self.height()
         m = self.RESIZE_MARGIN
@@ -377,52 +564,37 @@ class MainWindow(QWidget):
         elif x > w - m: areas.append('right')
         if y < m: areas.append('top')
         elif y > h - m: areas.append('bottom')
-        
         return areas
     
     def _set_cursor_for_resize(self, areas):
-        """根据调整区域设置鼠标样式"""
         if not areas:
             self.setCursor(Qt.ArrowCursor)
             return
-        
-        if 'left' in areas and 'top' in areas:
-            self.setCursor(Qt.SizeFDiagCursor)
-        elif 'right' in areas and 'bottom' in areas:
-            self.setCursor(Qt.SizeFDiagCursor)
-        elif 'left' in areas and 'bottom' in areas:
-            self.setCursor(Qt.SizeBDiagCursor)
-        elif 'right' in areas and 'top' in areas:
-            self.setCursor(Qt.SizeBDiagCursor)
-        elif 'left' in areas or 'right' in areas:
-            self.setCursor(Qt.SizeHorCursor)
-        elif 'top' in areas or 'bottom' in areas:
-            self.setCursor(Qt.SizeVerCursor)
+        if 'left' in areas and 'top' in areas: self.setCursor(Qt.SizeFDiagCursor)
+        elif 'right' in areas and 'bottom' in areas: self.setCursor(Qt.SizeFDiagCursor)
+        elif 'left' in areas and 'bottom' in areas: self.setCursor(Qt.SizeBDiagCursor)
+        elif 'right' in areas and 'top' in areas: self.setCursor(Qt.SizeBDiagCursor)
+        elif 'left' in areas or 'right' in areas: self.setCursor(Qt.SizeHorCursor)
+        elif 'top' in areas or 'bottom' in areas: self.setCursor(Qt.SizeVerCursor)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            # 检查是否在边缘调整区域
             areas = self._get_resize_area(e.pos())
-            
             if areas:
-                # 开始调整大小
                 self._resize_area = areas
                 self._resize_start_pos = e.globalPos()
                 self._resize_start_geometry = self.geometry()
                 self._drag_pos = None
             elif e.y() < 40:
-                # 在标题栏，开始拖动
                 self._drag_pos = e.globalPos() - self.frameGeometry().topLeft()
                 self._resize_area = None
             else:
                 self._drag_pos = None
                 self._resize_area = None
-            
             e.accept()
 
     def mouseMoveEvent(self, e):
         if e.buttons() == Qt.NoButton:
-            # 没有按下按钮，只是移动鼠标
             areas = self._get_resize_area(e.pos())
             self._set_cursor_for_resize(areas)
             e.accept()
@@ -430,40 +602,29 @@ class MainWindow(QWidget):
         
         if e.buttons() == Qt.LeftButton:
             if self._resize_area:
-                # 调整窗口大小
                 delta = e.globalPos() - self._resize_start_pos
                 rect = self._resize_start_geometry
-                
-                min_width = 600
-                min_height = 400
-                
                 new_rect = rect.adjusted(0, 0, 0, 0)
-                
                 if 'left' in self._resize_area:
                     new_left = rect.left() + delta.x()
-                    if rect.right() - new_left >= min_width:
+                    if rect.right() - new_left >= 600:
                         new_rect.setLeft(new_left)
-                
                 if 'right' in self._resize_area:
                     new_width = rect.width() + delta.x()
-                    if new_width >= min_width:
+                    if new_width >= 600:
                         new_rect.setWidth(new_width)
-                
                 if 'top' in self._resize_area:
                     new_top = rect.top() + delta.y()
-                    if rect.bottom() - new_top >= min_height:
+                    if rect.bottom() - new_top >= 400:
                         new_rect.setTop(new_top)
-                
                 if 'bottom' in self._resize_area:
                     new_height = rect.height() + delta.y()
-                    if new_height >= min_height:
+                    if new_height >= 400:
                         new_rect.setHeight(new_height)
                 
                 self.setGeometry(new_rect)
                 e.accept()
-            
             elif self._drag_pos:
-                # 拖动窗口
                 self.move(e.globalPos() - self._drag_pos)
                 e.accept()
 
@@ -473,8 +634,7 @@ class MainWindow(QWidget):
         self.setCursor(Qt.ArrowCursor)
 
     def mouseDoubleClickEvent(self, e):
-        if e.y() < 40: 
-            self._toggle_maximize()
+        if e.y() < 40: self._toggle_maximize()
 
     def _toggle_maximize(self):
         if self.isMaximized():
@@ -485,124 +645,83 @@ class MainWindow(QWidget):
             self.max_btn.setText('❐')
 
     def _add_search_to_history(self):
-        """当用户在搜索框按回车时，将当前文本添加到历史记录。"""
         search_text = self.search.text().strip()
         if search_text:
             self.search.add_history_entry(search_text)
 
-    # ==================== 其余方法保持不变 ====================
-    
     def quick_add_idea(self, text):
-        """快速添加灵感(悬浮球拖拽触发)"""
         raw = text.strip()
         if not raw: return
-        
         lines = raw.split('\n')
         title = lines[0][:25].strip() if lines else "快速记录"
         if len(lines) > 1 or len(lines[0]) > 25: title += "..."
-        
-        # 使用默认的深灰色
         idea_id = self.db.add_idea(title, raw, COLORS['default_note'], [], None)
-        print(f"[DEBUG] 快速添加灵感成功,ID={idea_id}")
-        
         self._show_tag_selector(idea_id)
-        
         self._refresh_all()
 
     def _show_tag_selector(self, idea_id):
-        """显示标签选择浮窗"""
-        print(f"[DEBUG] 显示标签选择器,idea_id={idea_id}")
-        
-        tag_selector = AdvancedTagSelector(self.db, idea_id, self)
+        tag_selector = AdvancedTagSelector(self.db, idea_id, None, self)
         tag_selector.tags_confirmed.connect(lambda tags: self._on_tags_confirmed(idea_id, tags))
         tag_selector.show_at_cursor()
 
     def _on_tags_confirmed(self, idea_id, tags):
-        """标签确认后的回调"""
-        print(f"[DEBUG] 标签已确认,idea_id={idea_id}, tags={tags}")
         self._show_tooltip(f'✅ 已记录并绑定 {len(tags)} 个标签', 2000)
         self._refresh_all()
 
     def _set_filter(self, f_type, val):
         self.curr_filter = (f_type, val)
         self.selected_ids.clear()
-        self.last_clicked_id = None # 清除选区锚点
+        self.last_clicked_id = None
         self.current_tag_filter = None
         self.tag_filter_label.hide()
         self.clear_tag_btn.hide()
-        
         titles = {'all':'全部数据','today':'今日数据','trash':'回收站','favorite':'我的收藏'}
         if f_type == 'category':
             cat = next((c for c in self.db.get_categories() if c[0] == val), None)
             self.header_label.setText(f"📂 {cat[1]}" if cat else '文件夹')
         else:
             self.header_label.setText(titles.get(f_type, '灵感列表'))
-            
         self._load_data()
         self._update_ui_state()
         self._refresh_tag_panel()
 
     def _load_data(self):
-        print("[DEBUG] ========== _load_data 开始 ==========")
         while self.list_layout.count():
             w = self.list_layout.takeAt(0).widget()
             if w: w.deleteLater()
-            
         self.cards = {}
-        # 重置卡片顺序列表
         self.card_ordered_ids = []
-        
         data_list = self.db.get_ideas(self.search.text(), *self.curr_filter)
-        print(f"[DEBUG] 查询到 {len(data_list)} 条数据")
-        
         if self.current_tag_filter:
             filtered = []
             for d in data_list:
-                if self.current_tag_filter in self.db.get_tags(d[0]):
-                    filtered.append(d)
+                if self.current_tag_filter in self.db.get_tags(d[0]): filtered.append(d)
             data_list = filtered
-            print(f"[DEBUG] 标签筛选后剩余 {len(data_list)} 条")
-            
         if not data_list:
             self.list_layout.addWidget(QLabel("🔭 空空如也", alignment=Qt.AlignCenter, styleSheet="color:#666;font-size:16px;margin-top:50px"))
-            
         for d in data_list:
             c = IdeaCard(d, self.db)
-            
-            # 注入获取选中ID的方法
             c.get_selected_ids_func = lambda: list(self.selected_ids)
-
             c.selection_requested.connect(self._handle_selection_request)
-            
             c.double_clicked.connect(self._extract_single)
-            
             c.setContextMenuPolicy(Qt.CustomContextMenu)
             c.customContextMenuRequested.connect(lambda pos, iid=d[0]: self._show_card_menu(iid, pos))
-            
             self.list_layout.addWidget(c)
             self.cards[d[0]] = c
-            # 记录卡片顺序
             self.card_ordered_ids.append(d[0])
-            
-        print(f"[DEBUG] 共创建 {len(self.cards)} 个卡片")
         self._update_ui_state()
 
     def _show_card_menu(self, idea_id, pos):
-        # 如果右键点击的项不在当前选择中，则强制只选择该项
         if idea_id not in self.selected_ids:
             self.selected_ids = {idea_id}
             self.last_clicked_id = idea_id
             self._update_all_card_selections()
             self._update_ui_state()
-        
         data = self.db.get_idea(idea_id)
         if not data: return
-        
         menu = QMenu(self)
         menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_mid']}; color: white; border: 1px solid {COLORS['bg_light']}; border-radius: 6px; padding: 4px; }} QMenu::item {{ padding: 8px 20px; border-radius: 4px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }} QMenu::separator {{ height: 1px; background: {COLORS['bg_light']}; margin: 4px 0px; }}")
-        
         in_trash = (self.curr_filter[0] == 'trash')
-        
         if not in_trash:
             menu.addAction('✏️ 编辑', self._do_edit)
             menu.addAction('📋 提取(Ctrl+T)', lambda: self._extract_single(idea_id))
@@ -610,18 +729,15 @@ class MainWindow(QWidget):
             menu.addAction('📌 取消置顶' if data[4] else '📌 置顶', self._do_pin)
             menu.addAction('☆ 取消收藏' if data[5] else '⭐ 收藏', self._do_fav)
             menu.addSeparator()
-            
             cat_menu = menu.addMenu('📂 移动到分类')
             cat_menu.addAction('⚠️ 未分类', lambda: self._move_to_category(None))
             for cat in self.db.get_categories():
                 cat_menu.addAction(f'📂 {cat[1]}', lambda cid=cat[0]: self._move_to_category(cid))
-                
             menu.addSeparator()
             menu.addAction('🗑️ 移至回收站', self._do_del)
         else:
             menu.addAction('♻️ 恢复', self._do_restore)
             menu.addAction('❌ 永久删除', self._do_destroy)
-            
         card = self.cards.get(idea_id)
         if card: menu.exec_(card.mapToGlobal(pos))
 
@@ -633,56 +749,31 @@ class MainWindow(QWidget):
             self._show_tooltip(f'✅ 已移动 {len(self.selected_ids)} 项')
 
     def _handle_selection_request(self, iid, is_ctrl, is_shift):
-        """
-        处理卡片点击事件，更新选择集合
-        :param iid: 当前点击的卡片ID
-        :param is_ctrl: 是否按下了 Control 键
-        :param is_shift: 是否按下了 Shift 键
-        """
-        
-        # 1. Shift 范围选择 (优先处理)
         if is_shift and self.last_clicked_id is not None:
-            # 找到锚点和当前点的索引
             try:
                 start_index = self.card_ordered_ids.index(self.last_clicked_id)
                 end_index = self.card_ordered_ids.index(iid)
-                
-                # 确定范围
                 min_idx = min(start_index, end_index)
                 max_idx = max(start_index, end_index)
-                
-                # 如果没按住 Ctrl，先清空选择
-                if not is_ctrl:
-                    self.selected_ids.clear()
-                
-                # 添加范围内的所有ID
+                if not is_ctrl: self.selected_ids.clear()
                 for idx in range(min_idx, max_idx + 1):
                     self.selected_ids.add(self.card_ordered_ids[idx])
             except ValueError:
-                # 如果找不到ID（比如被筛选掉了），回退到单选
                 self.selected_ids.clear()
                 self.selected_ids.add(iid)
                 self.last_clicked_id = iid
-                
-        # 2. Control 单个切换
         elif is_ctrl:
-            if iid in self.selected_ids:
-                self.selected_ids.remove(iid)
-            else:
-                self.selected_ids.add(iid)
-            self.last_clicked_id = iid # 更新锚点
-            
-        # 3. 普通单击 (清空其他，只选当前)
+            if iid in self.selected_ids: self.selected_ids.remove(iid)
+            else: self.selected_ids.add(iid)
+            self.last_clicked_id = iid
         else:
             self.selected_ids.clear()
             self.selected_ids.add(iid)
-            self.last_clicked_id = iid # 更新锚点
-        
+            self.last_clicked_id = iid
         self._update_all_card_selections()
         self._update_ui_state()
 
     def _update_all_card_selections(self):
-        """遍历所有卡片，根据 self.selected_ids 更新其视觉状态"""
         for iid, card in self.cards.items():
             card.update_selection(iid in self.selected_ids)
 
@@ -691,22 +782,11 @@ class MainWindow(QWidget):
         selection_count = len(self.selected_ids)
         has_selection = selection_count > 0
         is_single_selection = selection_count == 1
-
-        # 通用按钮可见性
-        for k in ['pin', 'fav', 'del']:
-            self.btns[k].setVisible(not in_trash)
-        for k in ['rest', 'dest']:
-            self.btns[k].setVisible(in_trash)
-
-        # “编辑”按钮：仅单选时可用
+        for k in ['pin', 'fav', 'del']: self.btns[k].setVisible(not in_trash)
+        for k in ['rest', 'dest']: self.btns[k].setVisible(in_trash)
         self.btns['edit'].setVisible(not in_trash)
         self.btns['edit'].setEnabled(is_single_selection)
-
-        # 其他操作按钮：有选择时即可用
-        for k in ['pin', 'fav', 'del', 'rest', 'dest']:
-            self.btns[k].setEnabled(has_selection)
-            
-        # 更新 pin 和 fav 按钮的图标（仅单选时有意义）
+        for k in ['pin', 'fav', 'del', 'rest', 'dest']: self.btns[k].setEnabled(has_selection)
         if is_single_selection and not in_trash:
             idea_id = list(self.selected_ids)[0]
             d = self.db.get_idea(idea_id)
@@ -714,65 +794,52 @@ class MainWindow(QWidget):
                 self.btns['pin'].setText('📍' if not d[4] else '📌')
                 self.btns['fav'].setText('☆' if not d[5] else '⭐')
         else:
-            # 多选或无选择时，恢复默认图标
             self.btns['pin'].setText('📌')
             self.btns['fav'].setText('⭐')
+        self._refresh_tag_panel()
 
     def _on_new_data_in_category_requested(self, cat_id):
-        """响应侧边栏请求，在指定分类下创建新笔记"""
-        print(f"[DEBUG] 响应 new_data_requested 信号, cat_id={cat_id}")
         dialog = EditDialog(self.db, category_id_for_new=cat_id, parent=self)
-        if dialog.exec_():
-            self._refresh_all()
+        if dialog.exec_(): self._refresh_all()
 
     def _show_tooltip(self, msg, dur=2000):
         QToolTip.showText(QCursor.pos(), msg, self)
         QTimer.singleShot(dur, QToolTip.hideText)
 
     def new_idea(self):
-        print("[DEBUG] new_idea 被调用")
         if EditDialog(self.db).exec_(): self._refresh_all()
 
     def _do_edit(self):
         if len(self.selected_ids) == 1:
             idea_id = list(self.selected_ids)[0]
-            print(f"[DEBUG] ========== _do_edit 被调用 ========== idea_id={idea_id}")
-            
-            # 创建EditDialog实例,它现在需要完整的idea数据来初始化
             dialog = EditDialog(self.db, idea_id=idea_id)
-            if dialog.exec_():
-                self._refresh_all()
+            if dialog.exec_(): self._refresh_all()
 
     def _do_pin(self):
         if self.selected_ids:
-            for iid in self.selected_ids:
-                self.db.toggle_field(iid, 'is_pinned')
+            for iid in self.selected_ids: self.db.toggle_field(iid, 'is_pinned')
             self._load_data()
 
     def _do_fav(self):
         if self.selected_ids:
-            for iid in self.selected_ids:
-                self.db.toggle_field(iid, 'is_favorite')
+            for iid in self.selected_ids: self.db.toggle_field(iid, 'is_favorite')
             self._refresh_all()
 
     def _do_del(self):
         if self.selected_ids:
-            for iid in self.selected_ids:
-                self.db.set_deleted(iid, True)
+            for iid in self.selected_ids: self.db.set_deleted(iid, True)
             self.selected_ids.clear()
             self._refresh_all()
 
     def _do_restore(self):
         if self.selected_ids:
-            for iid in self.selected_ids:
-                self.db.set_deleted(iid, False)
+            for iid in self.selected_ids: self.db.set_deleted(iid, False)
             self.selected_ids.clear()
             self._refresh_all()
 
     def _do_destroy(self):
         if self.selected_ids and QMessageBox.Yes == QMessageBox.warning(self, '⚠️ 警告', f'确定永久删除选中的 {len(self.selected_ids)} 项?\n此操作不可恢复!', QMessageBox.Yes | QMessageBox.No):
-            for iid in self.selected_ids:
-                self.db.delete_permanent(iid)
+            for iid in self.selected_ids: self.db.delete_permanent(iid)
             self.selected_ids.clear()
             self._refresh_all()
 
@@ -783,30 +850,20 @@ class MainWindow(QWidget):
         self._refresh_tag_panel()
 
     def _extract_single(self, idea_id):
-        """双击直接提取正文内容到剪贴板"""
-        print(f"[DEBUG] _extract_single 被调用,idea_id={idea_id}")
-        
         data = self.db.get_idea(idea_id)
         if not data:
             self._show_tooltip('⚠️ 数据不存在', 1500)
             return
-            
-        # 直接提取笔记的全部正文内容
         content_to_copy = data[2] if data[2] else ""
         QApplication.clipboard().setText(content_to_copy)
-        
-        # 更新提示信息,显示正文预览
         preview = content_to_copy.replace('\n', ' ')[:40] + ('...' if len(content_to_copy) > 40 else '')
         self._show_tooltip(f'✅ 内容已提取到剪贴板\n\n📋 {preview}', 2500)
-        
-        print(f"[DEBUG] 纯文本内容已复制到剪贴板: {preview}...")
 
     def _extract_all(self):
         data = self.db.get_ideas('', 'all', None)
         if not data:
             self._show_tooltip('🔭 暂无数据', 1500)
             return
-            
         lines = ['='*60, '💡 灵感闪记 - 内容导出', '='*60, '']
         for d in data:
             lines.append(f"【{d[1]}】")
@@ -817,7 +874,6 @@ class MainWindow(QWidget):
             lines.append(f"时间: {d[6]}")
             if d[2]: lines.append(f"\n{d[2]}")
             lines.append('\n'+'-'*60+'\n')
-            
         text = '\n'.join(lines)
         QApplication.clipboard().setText(text)
         self._show_tooltip(f'✅ 已提取 {len(data)} 条到剪贴板!', 2000)
@@ -826,7 +882,6 @@ class MainWindow(QWidget):
         self._do_destroy() if self.curr_filter[0] == 'trash' else self._do_del()
 
     def _handle_extract_key(self):
-        """处理 Ctrl+T 快捷键,提取选中笔记的正文"""
         if len(self.selected_ids) == 1:
             self._extract_single(list(self.selected_ids)[0])
         elif len(self.selected_ids) > 1:
@@ -843,9 +898,6 @@ class MainWindow(QWidget):
         QApplication.quit()
 
     def closeEvent(self, event):
-        """
-        重写关闭事件,使其发出 closing 信号而不是直接关闭。
-        """
         self.closing.emit()
         self.hide()
         event.ignore()
