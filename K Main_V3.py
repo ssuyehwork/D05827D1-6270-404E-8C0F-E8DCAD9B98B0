@@ -37,7 +37,7 @@ class AppManager(QObject):
         try:
             self.db_manager = DatabaseManager()
         except Exception as e:
-            print(f"❌ 数据库连接失败: {e}")
+            pass
             sys.exit(1)
 
         logo_path = os.path.join("assets", "logo.svg")
@@ -45,11 +45,10 @@ class AppManager(QObject):
             app_icon = QIcon(logo_path)
             self.app.setWindowIcon(app_icon)
         else:
-            print("⚠️ 未找到 logo.svg，请确保文件在 assets 文件夹中")
             app_icon = QIcon()
         
-        self.app.setApplicationName("快速笔记")
-        self.app.setApplicationDisplayName("快速笔记")
+        self.app.setApplicationName("")
+        self.app.setApplicationDisplayName("")
         self.app.setOrganizationName("RapidNotes")
         self.app.setOrganizationDomain("rapidnotes.local")
 
@@ -158,12 +157,10 @@ class AppManager(QObject):
 
     def _on_tags_manager_closed(self, result):
         """这是标签管理对话框关闭后会执行的函数"""
-        print(f"标签管理器已关闭，返回结果: {result}")
         # 检查是否是“确定”关闭 (在dialogs.py中，保存/确定按钮通常会调用 self.accept())
         if result == QDialog.Accepted:
             if self.popup:
                 self.popup.common_tags_bar.reload_tags()
-                print("侦测到修改，已刷新标签栏。")
         
         # 清理引用，以便下次可以重新打开
         self.tags_manager_dialog = None
@@ -216,7 +213,14 @@ class AppManager(QObject):
             self.main_window.hide()
             
     def quit_application(self):
-        print("ℹ️  应用程序正在退出...")
+        if self.quick_window:
+            try:
+                self.quick_window.save_state()
+            except: pass
+        if self.main_window:
+            try:
+                self.main_window.save_state()
+            except: pass
         self.app.quit()
 
 def main():
@@ -226,20 +230,18 @@ def main():
     socket = QLocalSocket()
     socket.connectToServer(SERVER_NAME)
     if socket.waitForConnected(500):
-        print("ℹ️  检测到旧实例，发送退出指令...")
         socket.write(b'EXIT')
         socket.flush()
         socket.waitForBytesWritten(1000)
         socket.disconnectFromServer()
         time.sleep(0.5)
         QLocalServer.removeServer(SERVER_NAME)
-        print("✅ 旧实例已清理")
     else:
         QLocalServer.removeServer(SERVER_NAME)
 
     server = QLocalServer()
     if not server.listen(SERVER_NAME):
-        print(f"❌ 无法创建单例服务器: {server.errorString()}")
+        pass
     
     manager = AppManager(app)
 

@@ -295,6 +295,11 @@ class DatabaseManager:
         c.execute('SELECT t.name FROM tags t JOIN idea_tags it ON t.id=it.tag_id WHERE it.idea_id=?', (iid,))
         return [r[0] for r in c.fetchall()]
 
+    def get_all_tags(self):
+        c = self.conn.cursor()
+        c.execute('SELECT name FROM tags ORDER BY name')
+        return [r[0] for r in c.fetchall()]
+
     def get_categories(self):
         c = self.conn.cursor()
         c.execute('SELECT * FROM categories ORDER BY sort_order ASC, name ASC')
@@ -424,6 +429,13 @@ class DatabaseManager:
             if cat_id is not None:
                 counts['partitions'][cat_id] = count
 
+        # Add missing counts
+        c.execute("SELECT COUNT(*) FROM ideas i JOIN idea_tags it ON i.id = it.idea_id JOIN tags t ON it.tag_id = t.id WHERE t.name = '剪贴板' AND i.is_deleted=0")
+        counts['clipboard'] = c.fetchone()[0]
+
+        c.execute("SELECT COUNT(*) FROM ideas WHERE is_favorite=1 AND is_deleted=0")
+        counts['favorite'] = c.fetchone()[0]
+
         return counts
     
     def save_category_order(self, update_list):
@@ -438,7 +450,7 @@ class DatabaseManager:
             c.execute("COMMIT")
         except Exception as e:
             c.execute("ROLLBACK")
-            print(f"[ERROR] 保存分类结构失败: {e}")
+            pass
         finally:
             self.conn.commit()
 

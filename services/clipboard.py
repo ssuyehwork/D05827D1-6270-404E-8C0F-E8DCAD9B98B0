@@ -46,7 +46,6 @@ class ClipboardManager(QObject):
                     current_hash = self._hash_data(content)
                     
                     if current_hash != self._last_hash:
-                        print(f"[Clipboard] 捕获到文件/文件夹: {content}")
                         
                         # 【智能打标逻辑：文件与文件夹】
                         for path in filepaths:
@@ -81,7 +80,6 @@ class ClipboardManager(QObject):
                 current_hash = hashlib.md5(image_bytes).hexdigest()
                 
                 if current_hash != self._last_hash:
-                    print("[Clipboard] 捕获到图片。")
                     result = self.db.add_clipboard_item(item_type='image', content='[Image Data]', data_blob=image_bytes, category_id=category_id)
                     self._last_hash = current_hash
                     
@@ -98,7 +96,6 @@ class ClipboardManager(QObject):
                 
                 current_hash = self._hash_data(text)
                 if current_hash != self._last_hash:
-                    print(f"[Clipboard] 捕获到文本: {text[:30]}...")
                     
                     # 【智能打标逻辑：网址】
                     stripped_text = text.strip()
@@ -119,4 +116,4 @@ class ClipboardManager(QObject):
                     return
 
         except Exception as e:
-            print(f"处理剪贴板数据时出错: {e}")
+            pass

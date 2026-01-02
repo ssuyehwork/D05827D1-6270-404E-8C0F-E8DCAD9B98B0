@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QLine
 from PyQt5.QtCore import Qt, QTimer, QPoint, pyqtSignal, QRect, QSize
 from PyQt5.QtGui import QKeySequence, QCursor, QColor, QIntValidator
 from core.config import STYLES, COLORS
-from core.settings import load_setting
+from core.settings import load_setting, save_setting
 from data.db_manager import DatabaseManager
 from services.backup_service import BackupService
 from ui.sidebar import Sidebar
@@ -122,7 +122,6 @@ class MainWindow(QWidget):
 
     def __init__(self):
         super().__init__()
-        print("[DEBUG] ========== MainWindow 初始化开始 ==========")
         QApplication.setQuitOnLastWindowClosed(False)
         self.db = DatabaseManager()
         self.preview_service = PreviewService(self.db, self)
@@ -142,6 +141,8 @@ class MainWindow(QWidget):
         self.page_size = 20
         self.total_pages = 1
         
+        self.open_dialogs = [] # 存储打开的窗口
+        
         self.setWindowFlags(
             Qt.FramelessWindowHint | 
             Qt.Window | 
@@ -154,11 +155,10 @@ class MainWindow(QWidget):
         
         self._setup_ui()
         self._load_data()
-        print("[DEBUG] MainWindow 初始化完成")
-
     def _setup_ui(self):
         self.setWindowTitle('数据管理')
-        self.resize(1300, 700)
+        # self.resize(1300, 700) # Replaced by restore
+        self._restore_window_state()
         
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(12, 12, 12, 12)
@@ -392,7 +392,7 @@ class MainWindow(QWidget):
         
         self.btns = {}
         for k, i, f in [('pin','📌',self._do_pin), ('fav','⭐',self._do_fav), ('edit','✏️',self._do_edit),
-                        ('del','🗑️',self._do_del), ('rest','♻️',self._do_restore), ('dest','❌',self._do_destroy)]:
+                        ('del','🗑️',self._do_del), ('rest','♻️',self._do_restore), ('dest','🗑️',self._do_destroy)]:
             b = QPushButton(i)
             b.setStyleSheet(STYLES['btn_icon'])
             b.clicked.connect(f)
@@ -1000,7 +1000,7 @@ class MainWindow(QWidget):
             menu.addAction('🗑️ 移至回收站', self._do_del)
         else:
             menu.addAction('♻️ 恢复', self._do_restore)
-            menu.addAction('❌ 永久删除', self._do_destroy)
+            menu.addAction('🗑️ 永久删除', self._do_destroy)
         card = self.cards.get(idea_id)
         if card: menu.exec_(card.mapToGlobal(pos))
 
@@ -1062,21 +1062,36 @@ class MainWindow(QWidget):
         self._refresh_tag_panel()
 
     def _on_new_data_in_category_requested(self, cat_id):
-        dialog = EditDialog(self.db, category_id_for_new=cat_id, parent=self)
-        if dialog.exec_(): self._refresh_all()
+        self._open_edit_dialog(category_id_for_new=cat_id)
+
+    def _open_edit_dialog(self, idea_id=None, category_id_for_new=None):
+        # 检查是否已存在此ID的窗口
+        for dialog in self.open_dialogs:
+            if hasattr(dialog, 'idea_id') and dialog.idea_id == idea_id and idea_id is not None:
+                dialog.activateWindow()
+                return
+
+        dialog = EditDialog(self.db, idea_id=idea_id, category_id_for_new=category_id_for_new, parent=None)
+        dialog.setAttribute(Qt.WA_DeleteOnClose) # 确保关闭时删除
+        
+        dialog.accepted.connect(self._refresh_all)
+        dialog.finished.connect(lambda: self.open_dialogs.remove(dialog))
+
+        self.open_dialogs.append(dialog)
+        dialog.show()
+        dialog.activateWindow()
 
     def _show_tooltip(self, msg, dur=2000):
         QToolTip.showText(QCursor.pos(), msg, self)
         QTimer.singleShot(dur, QToolTip.hideText)
 
     def new_idea(self):
-        if EditDialog(self.db).exec_(): self._refresh_all()
+        self._open_edit_dialog()
 
     def _do_edit(self):
         if len(self.selected_ids) == 1:
             idea_id = list(self.selected_ids)[0]
-            dialog = EditDialog(self.db, idea_id=idea_id)
-            if dialog.exec_(): self._refresh_all()
+            self._open_edit_dialog(idea_id=idea_id)
 
     def _do_pin(self):
         if self.selected_ids:

@@ -9,11 +9,15 @@ import subprocess
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QListWidget, QLineEdit, 
                              QListWidgetItem, QHBoxLayout, QTreeWidget, QTreeWidgetItem, 
                              QPushButton, QStyle, QAction, QSplitter, QGraphicsDropShadowEffect, 
-                             QLabel, QTreeWidgetItemIterator, QShortcut, QAbstractItemView, QMenu)
+                             QLabel, QTreeWidgetItemIterator, QShortcut, QAbstractItemView, QMenu,
+                             QColorDialog, QInputDialog, QMessageBox)
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSettings, QUrl, QMimeData, pyqtSignal, QObject, QSize
 from PyQt5.QtGui import QImage, QColor, QCursor, QPixmap, QPainter, QIcon, QKeySequence, QDrag
 from services.preview_service import PreviewService
-from ui.dialogs import EditDialog  # 【新增】导入编辑窗口
+from ui.dialogs import EditDialog
+from ui.advanced_tag_selector import AdvancedTagSelector
+from core.config import COLORS
+from core.settings import load_setting, save_setting
 
 # =================================================================================
 #   Win32 API 定义
@@ -52,8 +56,7 @@ else:
     kernel32 = None
 
 def log(message):
-    try: print(message, flush=True)
-    except: pass
+    pass
 
 try:
     from data.db_manager import DatabaseManager as DBManager
@@ -96,44 +99,64 @@ class DraggableListWidget(QListWidget):
         drag.exec_(Qt.MoveAction)
 
 class DropTreeWidget(QTreeWidget):
-    """支持接收数据的分类树"""
-    item_dropped = pyqtSignal(int, int)
+    """支持接收数据的分类树（支持拖入内容 + 拖拽排序）"""
+    item_dropped = pyqtSignal(int, int) # id, cat_id
+    order_changed = pyqtSignal() # 排序改变信号
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setDragDropMode(QAbstractItemView.DropOnly)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDropIndicatorShown(True)
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat('application/x-idea-id'):
+        # 1. 也是内部拖拽重排序? (Standard TreeWidget mime type)
+        if event.source() == self:
+            super().dragEnterEvent(event)
+            event.accept()
+        # 2. 是拖入的笔记内容?
+        elif event.mimeData().hasFormat('application/x-idea-id'):
             event.accept()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasFormat('application/x-idea-id'):
+        # 1. 内部重排序
+        if event.source() == self:
+            super().dragMoveEvent(event)
+        # 2. 拖入笔记
+        elif event.mimeData().hasFormat('application/x-idea-id'):
             item = self.itemAt(event.pos())
             if item:
                 data = item.data(0, Qt.UserRole)
-                if data and data.get('type') == 'partition':
+                if data and data.get('type') in ['partition', 'favorite']:
                     self.setCurrentItem(item)
                     event.accept()
                     return
-        event.ignore()
+            event.ignore()
+        else:
+            event.ignore()
 
     def dropEvent(self, event):
+        # 1. 处理拖入的笔记
         if event.mimeData().hasFormat('application/x-idea-id'):
             try:
                 idea_id = int(event.mimeData().data('application/x-idea-id'))
                 item = self.itemAt(event.pos())
                 if item:
                     data = item.data(0, Qt.UserRole)
-                    if data and data.get('type') == 'partition':
+                    if data and data.get('type') in ['partition', 'favorite']:
                         cat_id = data.get('id')
                         self.item_dropped.emit(idea_id, cat_id)
                         event.acceptProposedAction()
             except Exception as e:
-                print(f"Drop error: {e}")
+                pass
+        # 2. 处理内部重排序 (调用父类逻辑)
+        elif event.source() == self:
+            super().dropEvent(event)
+            self.order_changed.emit()
+            event.accept()
 
 # =================================================================================
 #   样式表
@@ -193,6 +216,14 @@ QPushButton#PinButton:hover { background-color: #444; }
 QPushButton#PinButton:checked { background-color: #0078D4; color: white; border: 1px solid #005A9E; }
 """
 
+
+# 可双击的输入框，用于触发标签选择器
+class ClickableLineEdit(QLineEdit):
+    doubleClicked = pyqtSignal()
+    def mouseDoubleClickEvent(self, event):
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
+
 class QuickWindow(QWidget):
     RESIZE_MARGIN = 18 
     open_main_window_requested = pyqtSignal()
@@ -244,6 +275,11 @@ class QuickWindow(QWidget):
         
         self.partition_tree.currentItemChanged.connect(self._on_partition_selection_changed)
         self.partition_tree.item_dropped.connect(self._handle_category_drop)
+        
+        # 启用右键菜单
+        self.partition_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.partition_tree.customContextMenuRequested.connect(self._show_partition_context_menu)
+        self.partition_tree.order_changed.connect(self._save_partition_order)
         
         self.clear_action.triggered.connect(self.search_box.clear)
         self.search_box.textChanged.connect(lambda text: self.clear_action.setVisible(bool(text)))
@@ -488,31 +524,71 @@ class QuickWindow(QWidget):
             self._update_list()
 
     def _handle_category_drop(self, idea_id, cat_id):
-        self.db.move_category(idea_id, cat_id)
+        if cat_id == -20: # 收藏
+             self.db.set_favorite(idea_id, True)
+        else:
+             self.db.move_category(idea_id, cat_id)
         self._update_list()
         self._update_partition_tree()
 
+    def _save_partition_order(self):
+        update_list = []
+        
+        def iterate_items(parent_item, parent_id):
+            for i in range(parent_item.childCount()):
+                item = parent_item.child(i)
+                data = item.data(0, Qt.UserRole)
+                
+                # 仅处理分区类型的节点
+                if data and data.get('type') == 'partition':
+                    cat_id = data.get('id')
+                    update_list.append((cat_id, parent_id, i))
+                    
+                    if item.childCount() > 0:
+                        iterate_items(item, cat_id)
+                        
+        iterate_items(self.partition_tree.invisibleRootItem(), None)
+        
+        if update_list:
+            self.db.save_category_order(update_list)
+
     # --- Restore & Save State ---
     def _restore_window_state(self):
-        geometry = self.settings.value("geometry")
-        if geometry:
-            self.restoreGeometry(geometry)
+        geo_hex = load_setting("quick_window_geometry_hex")
+        if geo_hex:
+            try:
+                self.restoreGeometry(QByteArray.fromHex(geo_hex.encode()))
+            except: pass
         else:
             screen_geo = QApplication.desktop().screenGeometry()
             win_geo = self.geometry()
             x = (screen_geo.width() - win_geo.width()) // 2
             y = (screen_geo.height() - win_geo.height()) // 2
             self.move(x, y)
-        splitter_state = self.settings.value("splitter_state")
-        if splitter_state: self.splitter.restoreState(splitter_state)
+            
+        splitter_hex = load_setting("quick_window_splitter_hex")
+        if splitter_hex:
+            try:
+                self.splitter.restoreState(QByteArray.fromHex(splitter_hex.encode()))
+            except: pass
 
-        is_hidden = self.settings.value("partition_panel_hidden", False, type=bool)
+        is_hidden = load_setting("partition_panel_hidden", False)
         self.partition_tree.setHidden(is_hidden)
         self._update_partition_status_display()
 
+    def save_state(self):
+        """显式保存状态"""
+        geo_hex = self.saveGeometry().toHex().data().decode()
+        save_setting("quick_window_geometry_hex", geo_hex)
+        
+        split_hex = self.splitter.saveState().toHex().data().decode()
+        save_setting("quick_window_splitter_hex", split_hex)
+        
+        is_hidden = self.partition_tree.isHidden()
+        save_setting("partition_panel_hidden", is_hidden)
+
     def closeEvent(self, event):
-        self.settings.setValue("geometry", self.saveGeometry())
-        self.settings.setValue("splitter_state", self.splitter.saveState())
+        self.save_state()
         self.hide()
         event.ignore()
 
@@ -709,6 +785,8 @@ class QuickWindow(QWidget):
         static_items = [
             ("全部数据", {'type': 'all', 'id': -1}, QStyle.SP_DirHomeIcon, counts.get('total', 0)),
             ("今日数据", {'type': 'today', 'id': -5}, QStyle.SP_FileDialogDetailedView, counts.get('today_modified', 0)),
+            ("剪贴板数据", {'type': 'clipboard', 'id': -10}, QStyle.SP_ComputerIcon, counts.get('clipboard', 0)),
+            ("收藏", {'type': 'favorite', 'id': -20}, QStyle.SP_DialogYesButton, counts.get('favorite', 0)),
         ]
         
         for name, data, icon, count in static_items:
@@ -851,3 +929,137 @@ class QuickWindow(QWidget):
                 self.list_widget.setFocus()
                 QApplication.sendEvent(self.list_widget, event)
         else: super().keyPressEvent(event)
+
+    # --- 分区右键菜单 ---
+    def _show_partition_context_menu(self, pos):
+        item = self.partition_tree.itemAt(pos)
+        menu = QMenu(self)
+        menu.setStyleSheet(f"background-color: {COLORS.get('bg_dark', '#2d2d2d')}; color: white; border: 1px solid #444;")
+        
+        if not item:
+            menu.addAction('➕ 新建分组', self._new_group)
+            menu.exec_(self.partition_tree.mapToGlobal(pos))
+            return
+
+        data = item.data(0, Qt.UserRole)
+        
+        if data and data.get('type') == 'partition':
+            cat_id = data.get('id')
+            raw_text = item.text(0)
+            current_name = raw_text.split(' (')[0]
+
+            menu.addAction('➕ 新建数据', lambda: self._request_new_data(cat_id))
+            menu.addSeparator()
+            menu.addAction('🎨 设置颜色', lambda: self._change_color(cat_id))
+            menu.addAction('🏷️ 设置预设标签', lambda: self._set_preset_tags(cat_id))
+            menu.addSeparator()
+            menu.addAction('➕ 新建分组', self._new_group)
+            menu.addAction('➕ 新建分区', lambda: self._new_zone(cat_id))
+            menu.addAction('✏️ 重命名', lambda: self._rename_category(cat_id, current_name))
+            menu.addAction('🗑️ 删除', lambda: self._del_category(cat_id))
+            
+            menu.exec_(self.partition_tree.mapToGlobal(pos))
+        else:
+             # 对于系统项或空白处，仅提供基本操作或不显示新建分组
+             if not item:
+                menu.addAction('➕ 新建分组', self._new_group)
+                menu.exec_(self.partition_tree.mapToGlobal(pos))
+             else:
+                # 系统项禁止显示菜单，或仅显示允许的操作
+                pass
+
+    def _request_new_data(self, cat_id):
+        dialog = EditDialog(self.db, category_id_for_new=cat_id)
+        if dialog.exec_():
+            self._update_list()
+            self._update_partition_tree()
+
+    def _new_group(self):
+        text, ok = QInputDialog.getText(self, '新建组', '组名称:')
+        if ok and text:
+            self.db.add_category(text, parent_id=None)
+            self._update_partition_tree()
+            
+    def _new_zone(self, parent_id):
+        text, ok = QInputDialog.getText(self, '新建区', '区名称:')
+        if ok and text:
+            self.db.add_category(text, parent_id=parent_id)
+            self._update_partition_tree()
+
+    def _rename_category(self, cat_id, old_name):
+        text, ok = QInputDialog.getText(self, '重命名', '新名称:', text=old_name)
+        if ok and text and text.strip():
+            self.db.rename_category(cat_id, text.strip())
+            self._update_partition_tree()
+            self._update_list() # 可能影响列表显示的分类名
+
+    def _del_category(self, cid):
+        c = self.db.conn.cursor()
+        c.execute("SELECT COUNT(*) FROM categories WHERE parent_id = ?", (cid,))
+        child_count = c.fetchone()[0]
+
+        msg = '确认删除此分类? (其中的内容将移至未分类)'
+        if child_count > 0:
+            msg = f'此组包含 {child_count} 个区，确认一并删除?\n(所有内容都将移至未分类)'
+
+        if QMessageBox.Yes == QMessageBox.question(self, '确认删除', msg):
+            c.execute("SELECT id FROM categories WHERE parent_id = ?", (cid,))
+            child_ids = [row[0] for row in c.fetchall()]
+            for child_id in child_ids:
+                self.db.delete_category(child_id)
+            self.db.delete_category(cid)
+            self._update_partition_tree()
+            self._update_list()
+
+    def _change_color(self, cat_id):
+        color = QColorDialog.getColor(Qt.gray, self, "选择分类颜色")
+        if color.isValid():
+            self.db.set_category_color(cat_id, color.name())
+            self._update_partition_tree()
+
+    def _set_preset_tags(self, cat_id):
+        current_tags = self.db.get_category_preset_tags(cat_id)
+        
+        dlg = QDialog(self)
+        dlg.setWindowTitle("🏷️ 设置预设标签")
+        dlg.setStyleSheet(f"background-color: {COLORS.get('bg_dark', '#2d2d2d')}; color: #EEE;")
+        dlg.setFixedSize(350, 150)
+        
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        info = QLabel("拖入该分类时自动绑定以下标签：\n(双击输入框选择历史标签)")
+        info.setStyleSheet("color: #888; font-size: 12px; margin-bottom: 5px;")
+        layout.addWidget(info)
+        
+        inp = ClickableLineEdit()
+        inp.setText(current_tags)
+        inp.setPlaceholderText("例如: 工作, 重要 (逗号分隔)")
+        inp.setStyleSheet(f"background-color: {COLORS.get('bg_mid', '#333')}; border: 1px solid #444; padding: 6px; border-radius: 4px; color: white;")
+        layout.addWidget(inp)
+        
+        def open_tag_selector():
+            initial_list = [t.strip() for t in inp.text().split(',') if t.strip()]
+            selector = AdvancedTagSelector(self.db, idea_id=None, initial_tags=initial_list)
+            def on_confirmed(tags):
+                inp.setText(', '.join(tags))
+            selector.tags_confirmed.connect(on_confirmed)
+            selector.show_at_cursor()
+            
+        inp.doubleClicked.connect(open_tag_selector)
+        
+        btns = QHBoxLayout()
+        btns.addStretch()
+        btn_ok = QPushButton("完成")
+        btn_ok.setStyleSheet(f"background-color: {COLORS.get('primary', '#0078D4')}; border:none; padding: 5px 15px; border-radius: 4px; font-weight:bold; color: white;")
+        btn_ok.clicked.connect(dlg.accept)
+        btns.addWidget(btn_ok)
+        layout.addLayout(btns)
+        
+        if dlg.exec_() == QDialog.Accepted:
+            new_tags = inp.text().strip()
+            self.db.set_category_preset_tags(cat_id, new_tags)
+            
+            tags_list = [t.strip() for t in new_tags.split(',') if t.strip()]
+            if tags_list:
+                self.db.apply_preset_tags_to_category_items(cat_id, tags_list)

@@ -197,7 +197,7 @@ class Sidebar(QTreeWidget):
                 self.refresh()
                 e.acceptProposedAction()
             except Exception as err:
-                print(f"Drop error: {err}")
+                pass
         else:
             super().dropEvent(e)
             self._save_current_order()

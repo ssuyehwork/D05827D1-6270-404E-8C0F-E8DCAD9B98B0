@@ -1,12 +1,13 @@
 # ui/dialogs.py
 import sys
+from PyQt5.QtWidgets import QCompleter
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QGridLayout, QHBoxLayout,
                               QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton,
                               QProgressBar, QFrame, QApplication, QMessageBox, QShortcut,
                              QSpacerItem, QSizePolicy, QSplitter, QWidget, QScrollBar,
                              QGraphicsDropShadowEffect, QCheckBox)
-from PyQt5.QtGui import QKeySequence, QColor, QCursor
-from PyQt5.QtCore import Qt, QPoint, QRect
+from PyQt5.QtGui import QKeySequence, QColor, QCursor, QTextDocument, QTextCursor, QTextListFormat, QTextCharFormat
+from PyQt5.QtCore import Qt, QPoint, QRect, QEvent
 from core.config import STYLES, COLORS
 from core.settings import save_setting, load_setting
 from .components.rich_text_edit import RichTextEdit
@@ -125,6 +126,28 @@ class EditDialog(BaseDialog):
         self._init_ui()
         if idea_id: 
             self._load_data()
+        elif category_id_for_new:
+             idx = self.category_combo.findData(category_id_for_new)
+             if idx >= 0: self.category_combo.setCurrentIndex(idx)
+            
+        # 安装事件过滤器以支持键盘导航
+        self.title_inp.installEventFilter(self)
+        self.tags_inp.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Down:
+                if obj == self.title_inp:
+                    self.tags_inp.setFocus()
+                    return True
+                elif obj == self.tags_inp:
+                    self.content_inp.setFocus()
+                    return True
+            elif event.key() == Qt.Key_Up:
+                if obj == self.tags_inp:
+                    self.title_inp.setFocus()
+                    return True
+        return super().eventFilter(obj, event)
         
     def _init_ui(self):
         self.resize(950, 650)
@@ -134,9 +157,9 @@ class EditDialog(BaseDialog):
         main_layout.setSpacing(0)
         
         # 1. 自定义标题栏
-        title_bar = QWidget()
-        title_bar.setFixedHeight(40)
-        title_bar.setStyleSheet(f"""
+        self.title_bar = QWidget()
+        self.title_bar.setFixedHeight(40)
+        self.title_bar.setStyleSheet(f"""
             QWidget {{
                 background-color: {COLORS['bg_mid']};
                 border-top-left-radius: 12px;
@@ -144,7 +167,7 @@ class EditDialog(BaseDialog):
                 border-bottom: 1px solid {COLORS['bg_light']};
             }}
         """)
-        tb_layout = QHBoxLayout(title_bar)
+        tb_layout = QHBoxLayout(self.title_bar)
         tb_layout.setContentsMargins(15, 0, 10, 0)
         
         self.win_title = QLabel('✨ 记录灵感' if not self.idea_id else '✏️ 编辑笔记')
@@ -178,7 +201,7 @@ class EditDialog(BaseDialog):
         tb_layout.addWidget(self.btn_max)
         tb_layout.addWidget(btn_close)
         
-        main_layout.addWidget(title_bar)
+        main_layout.addWidget(self.title_bar)
         
         # 2. 内容区域
         content_widget = QWidget()
@@ -203,16 +226,50 @@ class EditDialog(BaseDialog):
         left_panel.setContentsMargins(5, 5, 5, 5)
         left_panel.setSpacing(12)
         
+        # --- 分区选择 ---
+        left_panel.addWidget(QLabel('📂 分区'))
+        self.category_combo = QComboBox()
+        self.category_combo.setFixedHeight(40)
+        self.category_combo.setStyleSheet(STYLES['combo_box'] if 'combo_box' in STYLES else f"""
+            QComboBox {{
+                background-color: {COLORS['bg_mid']};
+                border: 1px solid {COLORS['bg_light']};
+                border-radius: 6px;
+                padding: 5px;
+                color: #ddd;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['bg_dark']};
+                selection-background-color: {COLORS['primary']};
+            }}
+        """)
+        
+        # 加载分区数据
+        self.category_combo.addItem("🚫 未分类", None)
+        cats = self.db.get_categories()
+        for c in cats:
+            # c: (id, name, parent_id, color, sort_order, ...)
+            self.category_combo.addItem(f"📁 {c[1]}", c[0])
+            
+        left_panel.addWidget(self.category_combo)
+
+        # --- 标题输入 ---
         left_panel.addWidget(QLabel('📌 标题'))
         self.title_inp = QLineEdit()
         self.title_inp.setPlaceholderText("请输入灵感标题...")
         self.title_inp.setFixedHeight(40)
         left_panel.addWidget(self.title_inp)
         
-        left_panel.addWidget(QLabel('🏷️ 标签'))
+        # --- 标签输入 (带智能补全) ---
+        left_panel.addWidget(QLabel('🏷️ 标签 (智能补全)'))
         self.tags_inp = QLineEdit()
-        self.tags_inp.setPlaceholderText("使用逗号分隔...")
+        self.tags_inp.setPlaceholderText("使用逗号分隔，如: 工作, 待办")
         self.tags_inp.setFixedHeight(40)
+        
+        # 初始化补全器
+        self._init_completer()
+        
         left_panel.addWidget(self.tags_inp)
         
         left_panel.addSpacing(10)
@@ -269,7 +326,103 @@ class EditDialog(BaseDialog):
         right_panel.setContentsMargins(5, 5, 5, 5)
         right_panel.setSpacing(10)
         
-        right_panel.addWidget(QLabel('📝 详细内容'))
+        # 工具栏 (标题 + 功能按钮)
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel('📝 详细内容'))
+        
+        # --- 基本编辑按钮 ---
+        btn_style = """
+            QPushButton { background: transparent; border: 1px solid #444; border-radius: 4px; color: #ccc; margin-left: 2px; }
+            QPushButton:hover { background-color: #444; color: white; }
+        """
+        
+        def _create_tool_btn(text, tooltip, callback):
+            btn = QPushButton(text)
+            btn.setFixedSize(24, 24)
+            btn.setToolTip(tooltip)
+            btn.setStyleSheet(btn_style)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(callback)
+            header_layout.addWidget(btn)
+            return btn
+
+        header_layout.addSpacing(10)
+        _create_tool_btn("↩", "撤销 (Ctrl+Z)", lambda: self.content_inp.undo())
+        _create_tool_btn("↪", "重做 (Ctrl+Y)", lambda: self.content_inp.redo())
+        header_layout.addSpacing(5)
+        _create_tool_btn("•", "无序列表", lambda: self.content_inp.toggle_list(QTextListFormat.ListDisc))
+        _create_tool_btn("1.", "有序列表", lambda: self.content_inp.toggle_list(QTextListFormat.ListDecimal))
+        _create_tool_btn("🧹", "清除格式", lambda: self.content_inp.setCurrentCharFormat(QTextCharFormat()))
+
+        header_layout.addStretch()
+        
+        # 高亮按钮组
+        highlight_colors = [
+            ('#c0392b', '🔴'), # 红
+            ('#d35400', '🟠'), # 橙
+            ('#f1c40f', '🟡'), # 黄 (注意: 暗色下可能需要深一点，这里用金黄色)
+            ('#27ae60', '🟢'), # 绿
+            ('#2980b9', '🔵'), # 蓝
+            ('#8e44ad', '🟣'), # 紫
+            (None, '🚫')      # 清除
+        ]
+        
+        for color, icon in highlight_colors:
+            btn = QPushButton(icon)
+            btn.setFixedSize(24, 24)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip("清除高亮" if color is None else "高亮文字")
+            # 按钮样式
+            btn.setStyleSheet(f"""
+                QPushButton {{ 
+                    background-color: transparent; 
+                    border: 1px solid #444; 
+                    border-radius: 4px; 
+                    margin-left: 2px;
+                }}
+                QPushButton:hover {{ background-color: #444; }}
+            """)
+            btn.clicked.connect(lambda _, c=color: self.content_inp.highlight_selection(c))
+            header_layout.addWidget(btn)
+            
+        right_panel.addLayout(header_layout)
+
+        # 搜索栏 (默认隐藏)
+        self.search_bar = QWidget()
+        self.search_bar.setVisible(False)
+        self.search_bar.setStyleSheet(f"background-color: {COLORS['bg_mid']}; border-radius: 6px; padding: 2px;")
+        sb_layout = QHBoxLayout(self.search_bar)
+        sb_layout.setContentsMargins(5, 2, 5, 2)
+        sb_layout.setSpacing(5)
+        
+        self.search_inp = QLineEdit()
+        self.search_inp.setPlaceholderText("查找内容...")
+        self.search_inp.setStyleSheet("border: none; background: transparent; color: #fff;")
+        self.search_inp.returnPressed.connect(self._find_next)
+        
+        btn_prev = QPushButton("⬆")
+        btn_prev.setFixedSize(24, 24)
+        btn_prev.clicked.connect(self._find_prev)
+        btn_prev.setStyleSheet("background: transparent; border: none; color: #ccc;")
+        
+        btn_next = QPushButton("⬇")
+        btn_next.setFixedSize(24, 24)
+        btn_next.clicked.connect(self._find_next)
+        btn_next.setStyleSheet("background: transparent; border: none; color: #ccc;")
+        
+        btn_cls = QPushButton("×")
+        btn_cls.setFixedSize(24, 24)
+        btn_cls.clicked.connect(lambda: self.search_bar.hide())
+        btn_cls.setStyleSheet("background: transparent; border: none; color: #ccc;")
+        
+        sb_layout.addWidget(QLabel("🔍"))
+        sb_layout.addWidget(self.search_inp)
+        sb_layout.addWidget(btn_prev)
+        sb_layout.addWidget(btn_next)
+        sb_layout.addWidget(btn_cls)
+        
+        right_panel.addWidget(self.search_bar)
+
         self.content_inp = RichTextEdit()
         self.content_inp.setPlaceholderText("在这里记录详细内容（支持粘贴图片）...")
         self.content_inp.setStyleSheet("""
@@ -280,8 +433,14 @@ class EditDialog(BaseDialog):
                 padding: 10px;
                 font-size: 14px;
                 color: #eee;
+                selection-background-color: #4a90e2; 
             }
         """)
+        
+        # 绑定 Ctrl+F
+        shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self.content_inp)
+        shortcut_search.activated.connect(self._toggle_search_bar)
+        
         right_panel.addWidget(self.content_inp)
         
         self.splitter.addWidget(left_container)
@@ -295,6 +454,7 @@ class EditDialog(BaseDialog):
         
         QShortcut(QKeySequence("Ctrl+S"), self, self._save_data)
         QShortcut(QKeySequence("Escape"), self, self.close)
+        QShortcut(QKeySequence("Ctrl+W"), self, self.close)
         
         self._set_color(self.selected_color)
 
@@ -380,10 +540,43 @@ class EditDialog(BaseDialog):
             self.showNormal()
             self.btn_max.setText('□')
             self.outer_layout.setContentsMargins(15, 15, 15, 15)
+            
+            # 恢复圆角样式
+            self.content_container.setStyleSheet(f"""
+                #DialogContainer {{
+                    background-color: {COLORS['bg_dark']};
+                    border-radius: 12px;
+                }}
+            """ + STYLES['dialog'] + SCROLLBAR_STYLE)
+            
+            self.title_bar.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {COLORS['bg_mid']};
+                    border-top-left-radius: 12px;
+                    border-top-right-radius: 12px;
+                    border-bottom: 1px solid {COLORS['bg_light']};
+                }}
+            """)
         else:
             self.showMaximized()
             self.btn_max.setText('❐')
             self.outer_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # 去除圆角样式（直角）
+            self.content_container.setStyleSheet(f"""
+                #DialogContainer {{
+                    background-color: {COLORS['bg_dark']};
+                    border-radius: 0px;
+                }}
+            """ + STYLES['dialog'] + SCROLLBAR_STYLE)
+            
+            self.title_bar.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {COLORS['bg_mid']};
+                    border-radius: 0px;
+                    border-bottom: 1px solid {COLORS['bg_light']};
+                }}
+            """)
 
     def _set_color(self, color):
         self.selected_color = color
@@ -404,15 +597,111 @@ class EditDialog(BaseDialog):
                 new_style = f"background-color: {bg}; border-radius: 17px; border: 2px solid transparent;"
             btn.setStyleSheet(f"QPushButton {{ {new_style} }}")
 
+    # --- 智能标签补全逻辑 ---
+    def _init_completer(self):
+        all_tags = self.db.get_all_tags()
+        self.completer = QCompleter(all_tags, self)
+        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.completer.setFilterMode(Qt.MatchContains)
+        
+        self.completer.setWidget(self.tags_inp)
+        self.completer.activated.connect(self._on_completion_activated)
+        self.tags_inp.textEdited.connect(self._update_completion_prefix)
+
+    def _update_completion_prefix(self, text):
+        cursor_pos = self.tags_inp.cursorPosition()
+        text_before = text[:cursor_pos]
+        
+        # 找到当前正在输入的标签片段（最后一个逗号后）
+        last_comma = text_before.rfind(',')
+        if last_comma != -1:
+            prefix = text_before[last_comma+1:].strip()
+        else:
+            prefix = text_before.strip()
+            
+        if prefix:
+            self.completer.setCompletionPrefix(prefix)
+            if self.completer.completionCount() > 0:
+                # 弹出建议列表
+                cr = self.tags_inp.cursorRect()
+                cr.setWidth(self.completer.popup().sizeHintForColumn(0) + self.completer.popup().verticalScrollBar().sizeHint().width())
+                self.completer.complete(cr)
+            else:
+                self.completer.popup().hide()
+        else:
+            self.completer.popup().hide()
+
+    def _on_completion_activated(self, text):
+        # 替换当前输入的片段为完整标签
+        current_text = self.tags_inp.text()
+        cursor_pos = self.tags_inp.cursorPosition()
+        
+        text_before = current_text[:cursor_pos]
+        last_comma = text_before.rfind(',')
+        
+        start_replace = last_comma + 1 if last_comma != -1 else 0
+        
+        prefix = current_text[:start_replace]
+        # 保留光标后的内容(如果有)
+        suffix = current_text[cursor_pos:]
+        
+        new_text = prefix + text + ", " + suffix
+        self.tags_inp.setText(new_text)
+        # 移动光标到新标签后
+        self.tags_inp.setCursorPosition(len(prefix) + len(text) + 2)
+
+    # --- 搜索功能 ---
+    def _toggle_search_bar(self):
+        self.search_bar.setVisible(not self.search_bar.isVisible())
+        if self.search_bar.isVisible():
+            self.search_inp.setFocus()
+            sel = self.content_inp.textCursor().selectedText()
+            if sel: self.search_inp.setText(sel)
+        else:
+            self.content_inp.setFocus()
+
+    def _find_next(self):
+        text = self.search_inp.text()
+        if not text: return
+        
+        found = self.content_inp.find(text)
+        if not found:
+            # 循环查找: 移到开头再查一次
+            curr = self.content_inp.textCursor()
+            self.content_inp.moveCursor(QTextCursor.Start)
+            if not self.content_inp.find(text):
+                # 确实没找到，恢复光标
+                self.content_inp.setTextCursor(curr)
+
+    def _find_prev(self):
+        text = self.search_inp.text()
+        if not text: return
+        
+        found = self.content_inp.find(text, QTextDocument.FindBackward)
+        if not found:
+            # 循环查找: 移到结尾再查一次
+            curr = self.content_inp.textCursor()
+            self.content_inp.moveCursor(QTextCursor.End)
+            if not self.content_inp.find(text, QTextDocument.FindBackward):
+                self.content_inp.setTextCursor(curr)
+
     def _load_data(self):
         d = self.db.get_idea(self.idea_id, include_blob=True)
         if d:
             self.title_inp.setText(d[1])
-            self.content_inp.setText(d[2])
+            item_type = d[9]
+            if item_type != 'image':
+                self.content_inp.setText(d[2])
+            else:
+                self.content_inp.clear() # Clear any default text if it's an image
+
             self._set_color(d[3])
             self.category_id = d[8]
+            if self.category_id is not None:
+                idx = self.category_combo.findData(self.category_id)
+                if idx >= 0:
+                    self.category_combo.setCurrentIndex(idx)
             
-            item_type = d[9]
             data_blob = d[10]
             if item_type == 'image' and data_blob:
                 self.content_inp.set_image_data(data_blob)
@@ -433,17 +722,19 @@ class EditDialog(BaseDialog):
         # 【核心修复】智能保存默认颜色
         if self.chk_set_default.isChecked():
             save_setting('user_default_color', color)
-            print(f"[Settings] 已更新默认新建颜色为: {color}")
         
         item_type = 'text'
         data_blob = self.content_inp.get_image_data()
         if data_blob:
             item_type = 'image'
 
+        # 获取当前选中的分区ID
+        cat_id = self.category_combo.currentData()
+
         if self.idea_id:
-            self.db.update_idea(self.idea_id, title, content, color, tags, self.category_id, item_type, data_blob)
+            self.db.update_idea(self.idea_id, title, content, color, tags, cat_id, item_type, data_blob)
         else:
-            self.db.add_idea(title, content, color, tags, self.category_id_for_new, item_type, data_blob)
+            self.db.add_idea(title, content, color, tags, cat_id, item_type, data_blob)
         
         self.accept()
 

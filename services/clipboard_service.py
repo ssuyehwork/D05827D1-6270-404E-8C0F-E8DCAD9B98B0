@@ -38,7 +38,7 @@ class ClipboardService(QObject):
                     return
         except Exception as e:
             # Proper logging should be added here
-            print(f"Error processing clipboard data: {e}")
+            pass
 
     def _save_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         content_hash = self.hasher.compute(content, data_blob)
@@ -50,7 +50,6 @@ class ClipboardService(QObject):
         if existing_idea:
             idea_id = existing_idea[0]
             self.idea_repo.update_timestamp(idea_id)
-            print(f"Clipboard content already exists, timestamp updated for ID={idea_id}")
             return idea_id
         else:
             if item_type == 'text':
@@ -79,5 +78,4 @@ class ClipboardService(QObject):
                 self.tag_repo.update_tags_for_idea(idea_id, existing_tags)
             
             self.data_captured.emit()
-            print(f"New clipboard item saved with ID={idea_id}")
             return idea_id
