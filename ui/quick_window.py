@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# ui/quick_window.py
 import sys
 import os
 import ctypes
@@ -14,6 +13,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QListWidget, QL
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSettings, QUrl, QMimeData, pyqtSignal, QObject, QSize
 from PyQt5.QtGui import QImage, QColor, QCursor, QPixmap, QPainter, QIcon, QKeySequence, QDrag
 from services.preview_service import PreviewService
+from ui.dialogs import EditDialog  # 【新增】导入编辑窗口
 
 # =================================================================================
 #   Win32 API 定义
@@ -350,7 +350,6 @@ class QuickWindow(QWidget):
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setHandleWidth(4)
         
-        # 使用自定义的可拖拽列表
         self.list_widget = DraggableListWidget()
         self.list_widget.setFocusPolicy(Qt.StrongFocus)
         self.list_widget.setAlternatingRowColors(True)
@@ -432,6 +431,10 @@ class QuickWindow(QWidget):
 
         action_fav = menu.addAction("⭐ 取消收藏" if is_fav else "⭐ 收藏")
         action_fav.triggered.connect(self._do_toggle_favorite)
+        
+        # 【新增】编辑选项
+        action_edit = menu.addAction("✏️ 编辑")
+        action_edit.triggered.connect(self._do_edit_selected)
 
         menu.addSeparator()
 
@@ -448,12 +451,22 @@ class QuickWindow(QWidget):
             QApplication.clipboard().setText(content)
 
     # --- 逻辑处理 ---
+
     def _get_selected_id(self):
         item = self.list_widget.currentItem()
         if not item: return None
         data = item.data(Qt.UserRole)
-        if data: return data[0]
+        if data: return data[0] 
         return None
+    
+    # 【新增】编辑功能
+    def _do_edit_selected(self):
+        iid = self._get_selected_id()
+        if iid:
+            dialog = EditDialog(self.db, idea_id=iid)
+            if dialog.exec_():
+                self._update_list()
+                self._update_partition_tree()
 
     def _do_delete_selected(self):
         iid = self._get_selected_id()
@@ -637,7 +650,7 @@ class QuickWindow(QWidget):
             display_text = self._get_content_display(item_tuple)
             list_item.setText(display_text)
             
-            # 【修改】Tooltip 只显示分区和标签
+            # Tooltip 只显示分区和标签
             idea_id = item_tuple[0]
             category_id = item_tuple[8]
             
@@ -833,7 +846,6 @@ class QuickWindow(QWidget):
     def keyPressEvent(self, event):
         key = event.key()
         if key == Qt.Key_Escape: self.close()
-        
         elif key in (Qt.Key_Up, Qt.Key_Down):
             if not self.list_widget.hasFocus():
                 self.list_widget.setFocus()
