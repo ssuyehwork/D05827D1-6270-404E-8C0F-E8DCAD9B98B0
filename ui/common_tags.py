@@ -2,13 +2,94 @@
 # ui/common_tags.py
 
 from PyQt5.QtWidgets import (QWidget, QPushButton, QMenu, QInputDialog, 
-                             QSizePolicy, QHBoxLayout)
-from PyQt5.QtCore import Qt, pyqtSignal
+                             QLayout, QSizePolicy)
+from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QPoint
 from core.config import COLORS
 from core.settings import load_setting, save_setting
 
+# --- 核心组件：流式布局 ---
+class FlowLayout(QLayout):
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super(FlowLayout, self).__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self.itemList = []
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self.itemList.append(item)
+
+    def count(self):
+        return len(self.itemList)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self.itemList):
+            return self.itemList[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self.itemList):
+            return self.itemList.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        height = self.doLayout(QRect(0, 0, width, 0), True)
+        return height
+
+    def setGeometry(self, rect):
+        super(FlowLayout, self).setGeometry(rect)
+        self.doLayout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self.itemList:
+            size = size.expandedTo(item.minimumSize())
+        margin = self.contentsMargins()
+        size += QSize(margin.left() + margin.right(), margin.top() + margin.bottom())
+        return size
+
+    def doLayout(self, rect, testOnly):
+        x = rect.x()
+        y = rect.y()
+        lineHeight = 0
+        spacing = self.spacing()
+
+        for item in self.itemList:
+            wid = item.widget()
+            spaceX = spacing + wid.style().layoutSpacing(QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Horizontal)
+            spaceY = spacing + wid.style().layoutSpacing(QSizePolicy.PushButton, QSizePolicy.PushButton, Qt.Vertical)
+            
+            nextX = x + item.sizeHint().width() + spaceX
+            if nextX - spaceX > rect.right() and lineHeight > 0:
+                x = rect.x()
+                y = y + lineHeight + spaceY
+                nextX = x + item.sizeHint().width() + spaceX
+                lineHeight = 0
+
+            if not testOnly:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = nextX
+            lineHeight = max(lineHeight, item.sizeHint().height())
+
+        return y + lineHeight - rect.y()
+
+# --- 主类 ---
 class CommonTags(QWidget):
-    # 修改信号：传递 (标签名, 是否选中)
     tag_toggled = pyqtSignal(str, bool) 
     manager_requested = pyqtSignal()
     refresh_requested = pyqtSignal()
@@ -22,22 +103,25 @@ class CommonTags(QWidget):
         self.reload_tags()
 
     def _init_ui(self):
-        self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(8)
+        # 【核心修复】重命名变量为 flow_layout，避免遮挡 QWidget.layout() 方法
+        self.flow_layout = FlowLayout(self, margin=0, spacing=6)
         
         self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        self.setMinimumWidth(320) 
+        self.setMaximumWidth(380) 
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def reload_tags(self):
-        # 清理旧组件
-        while self.layout.count():
-            item = self.layout.takeAt(0)
-            if item and item.widget():
-                item.widget().deleteLater()
+        # 【核心修复】安全的清理逻辑
+        if self.flow_layout:
+            while self.flow_layout.count():
+                item = self.flow_layout.takeAt(0)
+                if item and item.widget():
+                    item.widget().deleteLater()
         
         self.tag_buttons.clear()
 
@@ -57,74 +141,91 @@ class CommonTags(QWidget):
         for tag in display_tags:
             name = tag['name']
             btn = QPushButton(name)
-            # --- 核心修改：启用 Checkable (开关模式) ---
-            btn.setCheckable(True) 
+            btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(26)
+            btn.setProperty("tag_name", name)
             
-            # --- 样式逻辑：增加 :checked 状态 ---
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: rgba(255, 255, 255, 0.08);
-                    color: #CCC;
-                    border: 1px solid rgba(255, 255, 255, 0.15);
-                    border-radius: 13px;
-                    padding: 0px 12px;
-                    font-size: 12px;
-                    font-family: "Segoe UI", "Microsoft YaHei";
-                }}
-                /* 悬停 */
-                QPushButton:hover {{
-                    background-color: rgba(255, 255, 255, 0.15);
-                    color: #FFF;
-                    border: 1px solid rgba(255, 255, 255, 0.3);
-                }}
-                /* --- 选中高亮状态 (蓝色) --- */
-                QPushButton:checked {{
-                    background-color: {COLORS['primary']}; 
-                    border: 1px solid {COLORS['primary']}; 
-                    color: white;
-                    font-weight: bold;
-                }}
-            """)
+            self._update_btn_style(btn)
             
-            # 连接 Toggle 信号
-            btn.toggled.connect(lambda checked, n=name: self.tag_toggled.emit(n, checked))
+            btn.toggled.connect(lambda checked, b=btn, n=name: self._on_btn_toggled(b, n, checked))
             
-            self.layout.addWidget(btn)
+            self.flow_layout.addWidget(btn)
             self.tag_buttons.append(btn)
 
-        # 管理按钮
         btn_edit = QPushButton("⚙")
         btn_edit.setToolTip("管理标签")
         btn_edit.setCursor(Qt.PointingHandCursor)
-        btn_edit.setFixedSize(26, 26)
         btn_edit.setStyleSheet(f"""
             QPushButton {{
-                background-color: transparent;
+                background-color: rgba(255, 255, 255, 0.05);
                 color: #666;
                 border: none;
-                border-radius: 13px;
-                font-size: 16px;
-                padding-bottom: 1px;
+                border-radius: 10px;
+                width: 20px;
+                height: 20px;
+                padding: 0px;
+                font-size: 12px;
             }}
             QPushButton:hover {{
-                background-color: rgba(255,255,255,0.1);
-                color: #EEE;
+                background-color: rgba(255, 255, 255, 0.1);
+                color: {COLORS['primary']};
             }}
         """)
         btn_edit.clicked.connect(self.manager_requested.emit)
-        self.layout.addWidget(btn_edit)
+        self.flow_layout.addWidget(btn_edit)
         
         self.refresh_requested.emit()
 
     def reset_selection(self):
-        """重置所有按钮为未选中状态（防止下一个弹窗继承上一个的状态）"""
         for btn in self.tag_buttons:
-            # 阻断信号，防止重置时触发数据库操作
             btn.blockSignals(True)
             btn.setChecked(False)
+            self._update_btn_style(btn)
             btn.blockSignals(False)
+
+    def _on_btn_toggled(self, btn, name, checked):
+        self._update_btn_style(btn)
+        self.tag_toggled.emit(name, checked)
+
+    def _update_btn_style(self, btn):
+        checked = btn.isChecked()
+        name = btn.property("tag_name")
+        
+        if checked:
+            btn.setText(f"✓ {name}")
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['primary']};
+                    color: white;
+                    border: 1px solid {COLORS['primary']};
+                    border-radius: 12px;
+                    padding: 3px 10px;
+                    font-size: 11px;
+                    font-family: "Microsoft YaHei", sans-serif;
+                    font-weight: bold;
+                }}
+            """)
+        else:
+            btn.setText(name)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgba(255, 255, 255, 0.08);
+                    color: #CCC;
+                    border: 1px solid transparent;
+                    border-radius: 12px;
+                    padding: 3px 10px;
+                    font-size: 11px;
+                    font-family: "Microsoft YaHei", sans-serif;
+                }}
+                QPushButton:hover {{
+                    background-color: rgba(255, 255, 255, 0.15);
+                    border: 1px solid #555;
+                    color: white;
+                }}
+            """)
+        
+        # 【核心修复】移除 adjustSize()，防止在布局过程中触发重绘循环导致崩溃
+        # 流式布局会自动处理大小
 
     def _show_context_menu(self, pos):
         menu = QMenu(self)

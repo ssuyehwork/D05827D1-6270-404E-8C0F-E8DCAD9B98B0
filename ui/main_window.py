@@ -2,7 +2,6 @@
 # ui/main_window.py
 import sys
 import math
-import json
 from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QLineEdit,
                                QPushButton, QLabel, QScrollArea, QShortcut, QMessageBox,
                                QApplication, QToolTip, QMenu, QFrame, QTextEdit, QDialog,
@@ -16,13 +15,10 @@ from services.backup_service import BackupService
 from ui.sidebar import Sidebar
 from ui.cards import IdeaCard
 from ui.dialogs import EditDialog
-# [修复] 删除了此处错误的 from ui.ball import FloatingBall
+from ui.ball import FloatingBall
 from ui.advanced_tag_selector import AdvancedTagSelector
 from ui.components.search_line_edit import SearchLineEdit
 from services.preview_service import PreviewService
-from core.logger import get_logger
-
-logger = get_logger('MainWindow')
 
 # --- 辅助类：流式布局 ---
 class FlowLayout(QLayout):
@@ -104,12 +100,14 @@ class ContentContainer(QWidget):
     cleared = pyqtSignal()
 
     def mousePressEvent(self, e):
+        # 点击空白处（没有子控件的地方）触发清除选择
         if self.childAt(e.pos()) is None:
             self.cleared.emit()
-            e.accept() 
+            e.accept() # 阻止事件冒泡，防止被父窗口再次处理
         else:
             super().mousePressEvent(e)
 
+# 可双击的输入框
 class ClickableLineEdit(QLineEdit):
     doubleClicked = pyqtSignal()
     def mouseDoubleClickEvent(self, event):
@@ -136,11 +134,12 @@ class MainWindow(QWidget):
         self._resize_start_pos = None
         self._resize_start_geometry = None
         
+        # 分页状态
         self.current_page = 1
         self.page_size = 20
         self.total_pages = 1
         
-        self.open_dialogs = [] 
+        self.open_dialogs = [] # 存储打开的窗口
         
         self.setWindowFlags(
             Qt.FramelessWindowHint | 
@@ -154,9 +153,9 @@ class MainWindow(QWidget):
         
         self._setup_ui()
         self._load_data()
-        
     def _setup_ui(self):
         self.setWindowTitle('数据管理')
+        # self.resize(1300, 700) # Replaced by restore
         self._restore_window_state()
         
         root_layout = QVBoxLayout(self)
@@ -215,6 +214,8 @@ class MainWindow(QWidget):
         QShortcut(QKeySequence("Ctrl+P"), self, self._do_pin)
         QShortcut(QKeySequence("Delete"), self, self._handle_del_key)
         QShortcut(QKeySequence("Escape"), self, self._clear_tag_filter)
+        
+        # 【新增】Ctrl+S 锁定/解锁快捷键
         QShortcut(QKeySequence("Ctrl+S"), self, self._do_lock)
         
         self.space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
@@ -265,6 +266,7 @@ class MainWindow(QWidget):
         
         layout.addSpacing(10)
         
+        # --- 分页控件区域 ---
         page_btn_style = """
             QPushButton { background-color: transparent; border: 1px solid #444; color: #aaa; border-radius: 4px; font-size: 11px; padding: 2px 8px; min-width: 20px; }
             QPushButton:hover { background-color: #333; color: white; border-color: #666; }
@@ -315,6 +317,7 @@ class MainWindow(QWidget):
         extract_btn = QPushButton('📤')
         extract_btn.setToolTip('批量提取全部')
         extract_btn.setStyleSheet(f"QPushButton {{ background-color: {COLORS['primary']}; border: none; color: white; border-radius: 6px; font-size: 18px; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; }} QPushButton:hover {{ background-color: #357abd; }}")
+        # 确保这里调用了 self._extract_all
         extract_btn.clicked.connect(self._extract_all)
         layout.addWidget(extract_btn)
         
@@ -342,6 +345,7 @@ class MainWindow(QWidget):
         
         return titlebar
 
+    # --- 分页逻辑 ---
     def _set_page(self, page_num):
         if page_num < 1: page_num = 1
         self.current_page = page_num
@@ -422,6 +426,7 @@ class MainWindow(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
         
+        # 1. 标题区
         header = QHBoxLayout()
         self.tag_panel_title = QLabel('🏷️ 最近标签')
         self.tag_panel_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #4a90e2;")
@@ -436,13 +441,14 @@ class MainWindow(QWidget):
         header.addWidget(self.clear_tag_btn)
         layout.addLayout(header)
         
+        # 2. 顶部输入框
         self.tag_input = ClickableLineEdit()
         self.tag_input.setPlaceholderText("🔍 搜索...")
         self.tag_input.setStyleSheet(f"""
             QLineEdit {{
                 background-color: #2D2D2D; 
                 border: 1px solid #444;
-                border-radius: 16px; 
+                border-radius: 16px; /* 全圆角胶囊 */
                 padding: 6px 12px; 
                 font-size: 12px; 
                 color: #EEE;
@@ -456,12 +462,14 @@ class MainWindow(QWidget):
         self.tag_input.doubleClicked.connect(self._open_tag_selector_for_selection)
         layout.addWidget(self.tag_input)
         
+        # 3. 分割线
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Plain)
         line.setStyleSheet(f"background-color: #505050; border: none; max-height: 1px; margin-top: 5px; margin-bottom: 5px;")
         layout.addWidget(line)
         
+        # 4. 标签列表区域
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("""
@@ -474,11 +482,13 @@ class MainWindow(QWidget):
         """)
         
         self.tag_list_widget = QWidget()
+        # 使用流式布局
         self.tag_list_layout = FlowLayout(self.tag_list_widget, margin=0, spacing=8)
         
         scroll.setWidget(self.tag_list_widget)
         layout.addWidget(scroll)
         
+        # 【关键修复】延迟初始化，防止启动时与布局冲突
         QTimer.singleShot(0, self._refresh_tag_panel)
         return panel
 
@@ -509,6 +519,7 @@ class MainWindow(QWidget):
         self.db.remove_tag_from_multiple_ideas(list(self.selected_ids), tag_name)
         self._refresh_all()
 
+    # 【核心逻辑】显示右键菜单
     def _show_tag_context_menu(self, pos, tag_name):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
@@ -669,116 +680,115 @@ class MainWindow(QWidget):
         return dlg.exec_() == QDialog.Accepted
 
     def _refresh_tag_panel(self):
-        try:
-            while self.tag_list_layout.count():
-                item = self.tag_list_layout.takeAt(0)
-                if item.widget():
-                    item.widget().hide()
-                    item.widget().deleteLater()
-                
-            if self.selected_ids:
-                self.tag_panel_title.setText(f"🖊️ 标签管理 ({len(self.selected_ids)})")
-                self.tag_input.setPlaceholderText("输入添加... (双击更多)")
-                self.clear_tag_btn.hide()
-                
-                tags = self.db.get_union_tags(list(self.selected_ids))
-                
-                if not tags:
-                    lbl = QLabel("无标签")
-                    lbl.setStyleSheet("color:#666; font-style:italic; margin-top:10px;")
-                    lbl.setAlignment(Qt.AlignCenter)
-                    self.tag_list_widget.layout().addWidget(lbl)
-                else:
-                    for tag_name in tags:
-                        btn = QPushButton(f"{tag_name}  ✕")
-                        btn.setCursor(Qt.PointingHandCursor)
-                        btn.setStyleSheet(f"""
-                            QPushButton {{
-                                background-color: #383838;
-                                color: #DDD;
-                                border: 1px solid #4D4D4D;
-                                border-radius: 14px;
-                                padding: 5px 12px;
-                                text-align: center;
-                                font-size: 12px;
-                                font-family: "Segoe UI", "Microsoft YaHei";
-                            }}
-                            QPushButton:hover {{
-                                background-color: {COLORS['danger']};
-                                border-color: {COLORS['danger']};
-                                color: white;
-                            }}
-                        """)
-                        btn.clicked.connect(lambda _, t=tag_name: self._remove_tag_from_selection(t))
-                        self.tag_list_layout.addWidget(btn)
-                        
+        # 【重要优化】清空布局时的标准写法，防止残留对象导致闪退
+        while self.tag_list_layout.count():
+            item = self.tag_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
+                item.widget().deleteLater()
+            
+        if self.selected_ids:
+            self.tag_panel_title.setText(f"🖊️ 标签管理 ({len(self.selected_ids)})")
+            self.tag_input.setPlaceholderText("输入添加... (双击更多)")
+            self.clear_tag_btn.hide()
+            
+            tags = self.db.get_union_tags(list(self.selected_ids))
+            
+            if not tags:
+                lbl = QLabel("无标签")
+                lbl.setStyleSheet("color:#666; font-style:italic; margin-top:10px;")
+                lbl.setAlignment(Qt.AlignCenter)
+                # 【关键修复】删除错误的 addItem(None) 调用
+                self.tag_list_widget.layout().addWidget(lbl)
             else:
-                self.tag_panel_title.setText("🏷️ 最近标签")
-                self.tag_input.setPlaceholderText("🔍 搜索...")
-                if self.current_tag_filter:
-                    self.clear_tag_btn.show()
-                else:
-                    self.clear_tag_btn.hide()
-                    
-                c = self.db.conn.cursor()
-                search_term = self.tag_input.text().strip()
-                sql = '''
-                    SELECT t.name, COUNT(it.idea_id) as cnt, MAX(i.updated_at) as last_used
-                    FROM tags t 
-                    JOIN idea_tags it ON t.id = it.tag_id 
-                    JOIN ideas i ON it.idea_id = i.id 
-                    WHERE i.is_deleted = 0 
-                '''
-                params = []
-                if search_term:
-                    sql += " AND t.name LIKE ?"
-                    params.append(f"%{search_term}%")
-                
-                sql += ' GROUP BY t.id ORDER BY last_used DESC, cnt DESC, t.name ASC'
-                
-                c.execute(sql, params)
-                tags = c.fetchall()
-                
-                if not tags:
-                    return
-                    
-                for row in tags:
-                    tag_name = row[0]
-                    count = row[1]
-                    is_active = (self.current_tag_filter == tag_name)
-                    icon = "✓" if is_active else "🕒"
-                    
-                    btn = QPushButton(f'{icon} {tag_name} ({count})')
+                for tag_name in tags:
+                    btn = QPushButton(f"{tag_name}  ✕")
                     btn.setCursor(Qt.PointingHandCursor)
-                    
-                    btn.setContextMenuPolicy(Qt.CustomContextMenu)
-                    btn.customContextMenuRequested.connect(lambda pos, n=tag_name: self._show_tag_context_menu(pos, n))
-                    
-                    bg_color = COLORS['primary'] if is_active else '#333333'
-                    border_color = COLORS['primary'] if is_active else '#444444'
-                    text_color = 'white' if is_active else '#CCCCCC'
-                    
                     btn.setStyleSheet(f"""
-                        QPushButton {{ 
-                            background-color: {bg_color}; 
-                            border: 1px solid {border_color}; 
-                            border-radius: 14px; 
-                            padding: 5px 12px; 
-                            text-align: center; 
-                            color: {text_color}; 
+                        QPushButton {{
+                            background-color: #383838;
+                            color: #DDD;
+                            border: 1px solid #4D4D4D;
+                            border-radius: 14px;
+                            padding: 5px 12px;
+                            text-align: center;
                             font-size: 12px;
                             font-family: "Segoe UI", "Microsoft YaHei";
-                        }} 
-                        QPushButton:hover {{ 
-                            background-color: {COLORS['primary']};
-                            border-color: {COLORS['primary']}; 
-                            color: white; 
+                        }}
+                        QPushButton:hover {{
+                            background-color: {COLORS['danger']};
+                            border-color: {COLORS['danger']};
+                            color: white;
                         }}
                     """)
-                    btn.clicked.connect(lambda _, t=tag_name: self._filter_by_tag(t))
+                    btn.clicked.connect(lambda _, t=tag_name: self._remove_tag_from_selection(t))
                     self.tag_list_layout.addWidget(btn)
-        except Exception as e:
-            logger.error(f"Tag Panel Refresh Error: {e}")
+                    
+        else:
+            self.tag_panel_title.setText("🏷️ 最近标签")
+            self.tag_input.setPlaceholderText("🔍 搜索...")
+            if self.current_tag_filter:
+                self.clear_tag_btn.show()
+            else:
+                self.clear_tag_btn.hide()
+                
+            c = self.db.conn.cursor()
+            search_term = self.tag_input.text().strip()
+            sql = '''
+                SELECT t.name, COUNT(it.idea_id) as cnt, MAX(i.updated_at) as last_used
+                FROM tags t 
+                JOIN idea_tags it ON t.id = it.tag_id 
+                JOIN ideas i ON it.idea_id = i.id 
+                WHERE i.is_deleted = 0 
+            '''
+            params = []
+            if search_term:
+                sql += " AND t.name LIKE ?"
+                params.append(f"%{search_term}%")
+            
+            sql += ' GROUP BY t.id ORDER BY last_used DESC, cnt DESC, t.name ASC'
+            
+            c.execute(sql, params)
+            tags = c.fetchall()
+            
+            if not tags:
+                return
+                
+            for row in tags:
+                tag_name = row[0]
+                count = row[1]
+                is_active = (self.current_tag_filter == tag_name)
+                icon = "✓" if is_active else "🕒"
+                
+                btn = QPushButton(f'{icon} {tag_name} ({count})')
+                btn.setCursor(Qt.PointingHandCursor)
+                
+                btn.setContextMenuPolicy(Qt.CustomContextMenu)
+                btn.customContextMenuRequested.connect(lambda pos, n=tag_name: self._show_tag_context_menu(pos, n))
+                
+                bg_color = COLORS['primary'] if is_active else '#333333'
+                border_color = COLORS['primary'] if is_active else '#444444'
+                text_color = 'white' if is_active else '#CCCCCC'
+                
+                btn.setStyleSheet(f"""
+                    QPushButton {{ 
+                        background-color: {bg_color}; 
+                        border: 1px solid {border_color}; 
+                        border-radius: 14px; 
+                        padding: 5px 12px; 
+                        text-align: center; 
+                        color: {text_color}; 
+                        font-size: 12px;
+                        font-family: "Segoe UI", "Microsoft YaHei";
+                    }} 
+                    QPushButton:hover {{ 
+                        background-color: {COLORS['primary']};
+                        border-color: {COLORS['primary']}; 
+                        color: white; 
+                    }}
+                """)
+                btn.clicked.connect(lambda _, t=tag_name: self._filter_by_tag(t))
+                self.tag_list_layout.addWidget(btn)
 
     def _filter_by_tag(self, tag_name):
         if self.current_tag_filter == tag_name:
@@ -800,6 +810,7 @@ class MainWindow(QWidget):
         QTimer.singleShot(10, self._load_data)
         QTimer.singleShot(10, self._refresh_tag_panel)
 
+    # ==================== 调整大小逻辑 ====================
     def _get_resize_area(self, pos):
         x, y = pos.x(), pos.y()
         w, h = self.width(), self.height()
@@ -928,43 +939,43 @@ class MainWindow(QWidget):
         else:
             self.header_label.setText(titles.get(f_type, '灵感列表'))
         
+        # 延迟执行，防止在点击事件处理中销毁对象
         QTimer.singleShot(10, self._load_data)
         QTimer.singleShot(10, self._update_ui_state)
         QTimer.singleShot(10, self._refresh_tag_panel)
 
     def _load_data(self):
-        try:
-            while self.list_layout.count():
-                w = self.list_layout.takeAt(0).widget()
-                if w: w.deleteLater()
-            self.cards = {}
-            self.card_ordered_ids = []
-            
-            total_items = self.db.get_ideas_count(self.search.text(), *self.curr_filter, tag_filter=self.current_tag_filter)
-            self.total_pages = math.ceil(total_items / self.page_size) if total_items > 0 else 1
-            
-            if self.current_page > self.total_pages: self.current_page = self.total_pages
-            if self.current_page < 1: self.current_page = 1
+        while self.list_layout.count():
+            w = self.list_layout.takeAt(0).widget()
+            if w: w.deleteLater()
+        self.cards = {}
+        self.card_ordered_ids = []
+        
+        # 【核心补充】此处必须先计算总数，否则分页控件全是 1/1
+        total_items = self.db.get_ideas_count(self.search.text(), *self.curr_filter, tag_filter=self.current_tag_filter)
+        self.total_pages = math.ceil(total_items / self.page_size) if total_items > 0 else 1
+        
+        # 修正页码范围
+        if self.current_page > self.total_pages: self.current_page = self.total_pages
+        if self.current_page < 1: self.current_page = 1
 
-            data_list = self.db.get_ideas(self.search.text(), *self.curr_filter, page=self.current_page, page_size=self.page_size, tag_filter=self.current_tag_filter)
+        data_list = self.db.get_ideas(self.search.text(), *self.curr_filter, page=self.current_page, page_size=self.page_size, tag_filter=self.current_tag_filter)
+        
+        if not data_list:
+            self.list_layout.addWidget(QLabel("🔭 空空如也", alignment=Qt.AlignCenter, styleSheet="color:#666;font-size:16px;margin-top:50px"))
+        for d in data_list:
+            c = IdeaCard(d, self.db)
+            c.get_selected_ids_func = lambda: list(self.selected_ids)
+            c.selection_requested.connect(self._handle_selection_request)
+            c.double_clicked.connect(self._extract_single)
+            c.setContextMenuPolicy(Qt.CustomContextMenu)
+            c.customContextMenuRequested.connect(lambda pos, iid=d[0]: self._show_card_menu(iid, pos))
+            self.list_layout.addWidget(c)
+            self.cards[d[0]] = c
+            self.card_ordered_ids.append(d[0])
             
-            if not data_list:
-                self.list_layout.addWidget(QLabel("🔭 空空如也", alignment=Qt.AlignCenter, styleSheet="color:#666;font-size:16px;margin-top:50px"))
-            for d in data_list:
-                c = IdeaCard(d, self.db)
-                c.get_selected_ids_func = lambda: list(self.selected_ids)
-                c.selection_requested.connect(self._handle_selection_request)
-                c.double_clicked.connect(self._extract_single)
-                c.setContextMenuPolicy(Qt.CustomContextMenu)
-                c.customContextMenuRequested.connect(lambda pos, iid=d[0]: self._show_card_menu(iid, pos))
-                self.list_layout.addWidget(c)
-                self.cards[d[0]] = c
-                self.card_ordered_ids.append(d[0])
-                
-            self._update_pagination_ui()
-            self._update_ui_state()
-        except Exception as e:
-            logger.error(f"Load Data Error: {e}")
+        self._update_pagination_ui() # 刷新页码显示
+        self._update_ui_state()
 
     def _show_card_menu(self, idea_id, pos):
         if idea_id not in self.selected_ids:
@@ -978,18 +989,22 @@ class MainWindow(QWidget):
         menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_mid']}; color: white; border: 1px solid {COLORS['bg_light']}; border-radius: 6px; padding: 4px; }} QMenu::item {{ padding: 8px 20px; border-radius: 4px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }} QMenu::separator {{ height: 1px; background: {COLORS['bg_light']}; margin: 4px 0px; }}")
         
         in_trash = (self.curr_filter[0] == 'trash')
+        
+        # 【新增】锁定状态检测
         is_locked = data[13] if len(data) > 13 else 0
         
         if not in_trash:
+            # 根据锁定状态显示不同菜单
             if not is_locked:
                 menu.addAction('✏️ 编辑', self._do_edit)
             else:
                 edit_action = menu.addAction('✏️ 编辑 (已锁定)')
-                edit_action.setEnabled(False) 
+                edit_action.setEnabled(False) # 禁用编辑
                 
             menu.addAction('📋 提取(Ctrl+T)', lambda: self._extract_single(idea_id))
             menu.addSeparator()
             
+            # 【新增】锁定/解锁选项
             if is_locked:
                 menu.addAction('🔓 解锁', self._do_lock)
             else:
@@ -1000,6 +1015,7 @@ class MainWindow(QWidget):
             menu.addAction('☆ 取消收藏' if data[5] else '⭐ 收藏', self._do_fav)
             menu.addSeparator()
             
+            # 锁定状态下禁止移动和删除
             if not is_locked:
                 cat_menu = menu.addMenu('📂 移动到分类')
                 cat_menu.addAction('⚠️ 未分类', lambda: self._move_to_category(None))
@@ -1018,22 +1034,35 @@ class MainWindow(QWidget):
         card = self.cards.get(idea_id)
         if card: menu.exec_(card.mapToGlobal(pos))
 
+    # 【新增】智能批量锁定/解锁逻辑
     def _do_lock(self):
         if not self.selected_ids: return
+        
+        # 1. 获取所有选中ID的当前锁定状态
         status_map = self.db.get_lock_status(list(self.selected_ids))
+        
+        # 2. 判断逻辑：如果选中的数据中有任意一个是“未锁定(0)”，则执行“全部锁定(1)”
+        #    只有当所有数据都是“已锁定(1)”时，才执行“全部解锁(0)”
         any_unlocked = False
         for iid, is_locked in status_map.items():
             if not is_locked:
                 any_unlocked = True
                 break
+        
         target_state = 1 if any_unlocked else 0
+        
+        # 3. 执行批量更新
         self.db.set_locked(list(self.selected_ids), target_state)
+        
         action_name = "锁定" if target_state else "解锁"
         self._show_tooltip(f"✅ 已{action_name} {len(self.selected_ids)} 项")
+        
+        # 4. 刷新界面
         QTimer.singleShot(10, self._refresh_all)
 
     def _move_to_category(self, cat_id):
         if self.selected_ids:
+            # 过滤掉锁定的项目
             valid_ids = []
             status_map = self.db.get_lock_status(list(self.selected_ids))
             for iid in self.selected_ids:
@@ -1072,6 +1101,7 @@ class MainWindow(QWidget):
             self.selected_ids.add(iid)
             self.last_clicked_id = iid
         self._update_all_card_selections()
+        # 【关键修复】异步更新UI状态，防止点击卡片时重绘右侧面板导致崩溃
         QTimer.singleShot(0, self._update_ui_state)
 
     def _update_all_card_selections(self):
@@ -1097,20 +1127,23 @@ class MainWindow(QWidget):
         else:
             self.btns['pin'].setText('📌')
             self.btns['fav'].setText('⭐')
+        # 【关键修复】异步刷新标签面板
         QTimer.singleShot(0, self._refresh_tag_panel)
 
     def _on_new_data_in_category_requested(self, cat_id):
         self._open_edit_dialog(category_id_for_new=cat_id)
 
     def _open_edit_dialog(self, idea_id=None, category_id_for_new=None):
+        # 检查是否已存在此ID的窗口
         for dialog in self.open_dialogs:
             if hasattr(dialog, 'idea_id') and dialog.idea_id == idea_id and idea_id is not None:
                 dialog.activateWindow()
                 return
 
         dialog = EditDialog(self.db, idea_id=idea_id, category_id_for_new=category_id_for_new, parent=None)
-        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.setAttribute(Qt.WA_DeleteOnClose) # 确保关闭时删除
         
+        # 使用 data_saved 刷新，确保实时性
         dialog.data_saved.connect(self._refresh_all)
         dialog.finished.connect(lambda: self.open_dialogs.remove(dialog) if dialog in self.open_dialogs else None)
 
@@ -1128,6 +1161,7 @@ class MainWindow(QWidget):
     def _do_edit(self):
         if len(self.selected_ids) == 1:
             idea_id = list(self.selected_ids)[0]
+            # 检查锁定
             status = self.db.get_lock_status([idea_id])
             if status.get(idea_id, 0):
                 self._show_tooltip("🔒 该笔记已锁定，请先解锁")
@@ -1146,6 +1180,7 @@ class MainWindow(QWidget):
 
     def _do_del(self):
         if self.selected_ids:
+            # 过滤掉锁定的项目
             valid_ids = []
             status_map = self.db.get_lock_status(list(self.selected_ids))
             for iid in self.selected_ids:
@@ -1159,22 +1194,28 @@ class MainWindow(QWidget):
 
             for iid in valid_ids: self.db.set_deleted(iid, True)
             self.selected_ids.clear()
+            # 【关键修复】使用 Timer 延迟刷新，解决信号风暴闪退
             QTimer.singleShot(10, self._refresh_all)
 
     def _do_restore(self):
         if self.selected_ids:
             for iid in self.selected_ids: self.db.set_deleted(iid, False)
             self.selected_ids.clear()
+            # 【关键修复】使用 Timer 延迟刷新，解决信号风暴闪退
             QTimer.singleShot(10, self._refresh_all)
 
     def _do_destroy(self):
         if self.selected_ids and QMessageBox.Yes == QMessageBox.warning(self, '⚠️ 警告', f'确定永久删除选中的 {len(self.selected_ids)} 项?\n此操作不可恢复!', QMessageBox.Yes | QMessageBox.No):
             for iid in self.selected_ids: self.db.delete_permanent(iid)
             self.selected_ids.clear()
+            # 【关键修复】使用 Timer 延迟刷新，解决信号风暴闪退
             QTimer.singleShot(10, self._refresh_all)
 
     def _refresh_all(self):
+        # 【关键保护】如果正在清理旧控件，不要重入
         if not self.isVisible(): return
+        
+        # 延迟执行所有刷新
         QTimer.singleShot(10, self._load_data)
         QTimer.singleShot(10, self.sidebar.refresh)
         QTimer.singleShot(10, self._update_ui_state)
@@ -1190,6 +1231,7 @@ class MainWindow(QWidget):
         preview = content_to_copy.replace('\n', ' ')[:40] + ('...' if len(content_to_copy) > 40 else '')
         self._show_tooltip(f'✅ 内容已提取到剪贴板\n\n📋 {preview}', 2500)
 
+    # 【补充方法】_extract_all
     def _extract_all(self):
         data = self.db.get_ideas('', 'all', None)
         if not data:

@@ -64,43 +64,6 @@ class DatabaseManager:
         if 'preset_tags' not in cat_cols:
             try: c.execute('ALTER TABLE categories ADD COLUMN preset_tags TEXT')
             except: pass
-
-        # --- FTS5 全文搜索支持 ---
-        try:
-            # 1. 创建虚拟表
-            c.execute('''CREATE VIRTUAL TABLE IF NOT EXISTS ideas_fts USING fts5(
-                title, content, content_rowid='id'
-            )''')
-            
-            # 2. 检查是否需要重建索引
-            c.execute("SELECT COUNT(*) FROM ideas_fts")
-            fts_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM ideas")
-            ideas_count = c.fetchone()[0]
-            
-            if ideas_count > 0 and fts_count == 0:
-                print("Building FTS index...")
-                c.execute("INSERT INTO ideas_fts(rowid, title, content) SELECT id, title, content FROM ideas")
-
-            # 3. 创建触发器：插入时同步
-            c.execute('''CREATE TRIGGER IF NOT EXISTS ideas_ai AFTER INSERT ON ideas BEGIN
-                INSERT INTO ideas_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
-            END''')
-            
-            # 4. 创建触发器：删除时同步
-            c.execute('''CREATE TRIGGER IF NOT EXISTS ideas_ad AFTER DELETE ON ideas BEGIN
-                INSERT INTO ideas_fts(ideas_fts, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
-            END''')
-            
-            # 5. 创建触发器：更新时同步
-            c.execute('''CREATE TRIGGER IF NOT EXISTS ideas_au AFTER UPDATE ON ideas BEGIN
-                INSERT INTO ideas_fts(ideas_fts, rowid, title, content) VALUES('delete', old.id, old.title, old.content);
-                INSERT INTO ideas_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
-            END''')
-            
-        except Exception as e:
-            # 如果环境不支持 FTS5，静默失败
-            pass
             
         self.conn.commit()
 
@@ -314,6 +277,9 @@ class DatabaseManager:
         if include_blob:
             c.execute('SELECT * FROM ideas WHERE id=?', (iid,))
         else:
+            # 明确指定列，与 get_ideas 保持一致 (无blob)
+            # 0:id, 1:title, 2:content, 3:color, 4:pinned, 5:fav, 6:created, 7:updated, 
+            # 8:cat_id, 9:is_deleted, 10:item_type, 11:data_blob(NULL), 12:hash(NULL), 13:is_locked
             c.execute('''
                 SELECT id, title, content, color, is_pinned, is_favorite, 
                        created_at, updated_at, category_id, is_deleted, item_type, 
@@ -325,7 +291,23 @@ class DatabaseManager:
     def get_ideas(self, search, f_type, f_val, page=None, page_size=20, tag_filter=None):
         c = self.conn.cursor()
         
-        # 使用 FTS 优化查询逻辑
+        # 【关键修改】显式列出所有字段，确保字段顺序绝对固定
+        # 索引对照：
+        # 0: id
+        # 1: title
+        # 2: content
+        # 3: color
+        # 4: is_pinned
+        # 5: is_favorite
+        # 6: created_at
+        # 7: updated_at
+        # 8: category_id
+        # 9: is_deleted
+        # 10: item_type
+        # 11: data_blob
+        # 12: content_hash
+        # 13: is_locked
+        
         q = """
             SELECT DISTINCT 
                 i.id, i.title, i.content, i.color, i.is_pinned, i.is_favorite, 
@@ -334,13 +316,8 @@ class DatabaseManager:
             FROM ideas i 
             LEFT JOIN idea_tags it ON i.id=it.idea_id 
             LEFT JOIN tags t ON it.tag_id=t.id 
+            WHERE 1=1
         """
-        
-        # 如果有搜索词，关联 FTS 表
-        if search:
-            q += " JOIN ideas_fts f ON i.id = f.rowid "
-            
-        q += " WHERE 1=1 "
         p = []
         
         if f_type == 'trash': q += ' AND i.is_deleted=1'
@@ -359,9 +336,8 @@ class DatabaseManager:
             p.append(tag_filter)
         
         if search:
-            search_query = f'"{search}"' if " " in search else f"{search}*" 
-            q += " AND ideas_fts MATCH ?"
-            p.append(search_query)
+            q += ' AND (i.title LIKE ? OR i.content LIKE ? OR t.name LIKE ?)'
+            p.extend([f'%{search}%']*3)
             
         if f_type == 'trash':
             q += ' ORDER BY i.updated_at DESC'
@@ -374,64 +350,12 @@ class DatabaseManager:
             q += ' LIMIT ? OFFSET ?'
             p.extend([limit, offset])
             
-        try:
-            c.execute(q, p)
-            return c.fetchall()
-        except sqlite3.OperationalError:
-            return self._get_ideas_fallback(search, f_type, f_val, page, page_size, tag_filter)
-
-    def _get_ideas_fallback(self, search, f_type, f_val, page, page_size, tag_filter):
-        c = self.conn.cursor()
-        q = """
-            SELECT DISTINCT 
-                i.id, i.title, i.content, i.color, i.is_pinned, i.is_favorite, 
-                i.created_at, i.updated_at, i.category_id, i.is_deleted, 
-                i.item_type, i.data_blob, i.content_hash, i.is_locked
-            FROM ideas i 
-            LEFT JOIN idea_tags it ON i.id=it.idea_id 
-            LEFT JOIN tags t ON it.tag_id=t.id 
-            WHERE 1=1
-        """
-        p = []
-        if f_type == 'trash': q += ' AND i.is_deleted=1'
-        else: q += ' AND (i.is_deleted=0 OR i.is_deleted IS NULL)'
-        
-        if f_type == 'category':
-            if f_val is None: q += ' AND i.category_id IS NULL'
-            else: q += ' AND i.category_id=?'; p.append(f_val)
-        elif f_type == 'today': q += " AND date(i.updated_at,'localtime')=date('now','localtime')"
-        elif f_type == 'clipboard': q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = '剪贴板'))"
-        elif f_type == 'untagged': q += ' AND i.id NOT IN (SELECT idea_id FROM idea_tags)'
-        elif f_type == 'favorite': q += ' AND i.is_favorite=1'
-        
-        if tag_filter:
-            q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = ?))"
-            p.append(tag_filter)
-        
-        if search:
-            q += ' AND (i.title LIKE ? OR i.content LIKE ? OR t.name LIKE ?)'
-            p.extend([f'%{search}%']*3)
-            
-        if f_type == 'trash': q += ' ORDER BY i.updated_at DESC'
-        else: q += ' ORDER BY i.is_pinned DESC, i.updated_at DESC'
-            
-        if page is not None and page_size is not None:
-            limit = page_size
-            offset = (page - 1) * page_size
-            q += ' LIMIT ? OFFSET ?'
-            p.extend([limit, offset])
-        
         c.execute(q, p)
         return c.fetchall()
 
     def get_ideas_count(self, search, f_type, f_val, tag_filter=None):
         c = self.conn.cursor()
-        
-        q = "SELECT COUNT(DISTINCT i.id) FROM ideas i "
-        if search: q += " JOIN ideas_fts f ON i.id = f.rowid "
-        else: q += " LEFT JOIN idea_tags it ON i.id=it.idea_id LEFT JOIN tags t ON it.tag_id=t.id "
-        
-        q += " WHERE 1=1 "
+        q = "SELECT COUNT(DISTINCT i.id) FROM ideas i LEFT JOIN idea_tags it ON i.id=it.idea_id LEFT JOIN tags t ON it.tag_id=t.id WHERE 1=1"
         p = []
         
         if f_type == 'trash': q += ' AND i.is_deleted=1'
@@ -450,38 +374,9 @@ class DatabaseManager:
             p.append(tag_filter)
             
         if search:
-            search_query = f'"{search}"' if " " in search else f"{search}*" 
-            q += " AND ideas_fts MATCH ?"
-            p.append(search_query)
-        elif search: 
-             q += ' AND (i.title LIKE ? OR i.content LIKE ?)'
-             p.extend([f'%{search}%']*2)
-
-        try:
-            c.execute(q, p)
-            return c.fetchone()[0]
-        except sqlite3.OperationalError:
-            return self._get_ideas_count_fallback(search, f_type, f_val, tag_filter)
-
-    def _get_ideas_count_fallback(self, search, f_type, f_val, tag_filter=None):
-        c = self.conn.cursor()
-        q = "SELECT COUNT(DISTINCT i.id) FROM ideas i LEFT JOIN idea_tags it ON i.id=it.idea_id LEFT JOIN tags t ON it.tag_id=t.id WHERE 1=1"
-        p = []
-        if f_type == 'trash': q += ' AND i.is_deleted=1'
-        else: q += ' AND (i.is_deleted=0 OR i.is_deleted IS NULL)'
-        if f_type == 'category':
-            if f_val is None: q += ' AND i.category_id IS NULL'
-            else: q += ' AND i.category_id=?'; p.append(f_val)
-        elif f_type == 'today': q += " AND date(i.updated_at,'localtime')=date('now','localtime')"
-        elif f_type == 'clipboard': q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = '剪贴板'))"
-        elif f_type == 'untagged': q += ' AND i.id NOT IN (SELECT idea_id FROM idea_tags)'
-        elif f_type == 'favorite': q += ' AND i.is_favorite=1'
-        if tag_filter:
-            q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = ?))"
-            p.append(tag_filter)
-        if search:
             q += ' AND (i.title LIKE ? OR i.content LIKE ? OR t.name LIKE ?)'
             p.extend([f'%{search}%']*3)
+            
         c.execute(q, p)
         return c.fetchone()[0]
 

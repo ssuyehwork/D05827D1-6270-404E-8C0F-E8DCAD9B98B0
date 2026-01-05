@@ -1,7 +1,5 @@
-# -*- coding: utf-8 -*-
 # ui/dialogs.py
 import sys
-import json
 from PyQt5.QtWidgets import QCompleter
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QGridLayout, QHBoxLayout,
                               QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton,
@@ -13,7 +11,6 @@ from PyQt5.QtCore import Qt, QPoint, QRect, QEvent, pyqtSignal
 from core.config import STYLES, COLORS
 from core.settings import save_setting, load_setting
 from .components.rich_text_edit import RichTextEdit
-from ui.components.syntax_highlighter import SimpleHighlighter
 
 # 自定义深灰色滚动条样式
 SCROLLBAR_STYLE = """
@@ -62,8 +59,10 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 class BaseDialog(QDialog):
     def __init__(self, parent=None, window_title="快速笔记"):
         super().__init__(parent)
+        # 【关键修复】改为非模态窗口，允许与其他窗口并存
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # 【新增】设置窗口标题（影响任务栏显示）
         self.setWindowTitle(window_title)
         
         self._setup_container()
@@ -98,16 +97,20 @@ class EditDialog(BaseDialog):
     data_saved = pyqtSignal()
 
     def __init__(self, db, idea_id=None, parent=None, category_id_for_new=None):
+        # 【修复】根据是编辑还是新建设置不同的标题
         window_title = "编辑笔记" if idea_id else "新建笔记"
         super().__init__(parent, window_title=window_title)
         self.db = db
         self.idea_id = idea_id
         
+        # 【核心修复】智能默认颜色逻辑
         saved_default = load_setting('user_default_color')
         if saved_default:
+            # 用户已设置默认颜色
             self.selected_color = saved_default
             self.is_using_saved_default = True
         else:
+            # 未设置，使用橙色
             self.selected_color = COLORS['orange']
             self.is_using_saved_default = False
         
@@ -128,6 +131,7 @@ class EditDialog(BaseDialog):
              idx = self.category_combo.findData(category_id_for_new)
              if idx >= 0: self.category_combo.setCurrentIndex(idx)
             
+        # 安装事件过滤器以支持键盘导航
         self.title_inp.installEventFilter(self)
         self.tags_inp.installEventFilter(self)
 
@@ -192,7 +196,7 @@ class EditDialog(BaseDialog):
         
         btn_close = QPushButton("×")
         btn_close.setStyleSheet(close_btn_style)
-        btn_close.clicked.connect(self.close) 
+        btn_close.clicked.connect(self.close)  # 【修复】改为 close() 而非 reject()
         
         tb_layout.addWidget(btn_min)
         tb_layout.addWidget(self.btn_max)
@@ -246,6 +250,7 @@ class EditDialog(BaseDialog):
         self.category_combo.addItem("🚫 未分类", None)
         cats = self.db.get_categories()
         for c in cats:
+            # c: (id, name, parent_id, color, sort_order, ...)
             self.category_combo.addItem(f"📁 {c[1]}", c[0])
             
         left_panel.addWidget(self.category_combo)
@@ -257,12 +262,13 @@ class EditDialog(BaseDialog):
         self.title_inp.setFixedHeight(40)
         left_panel.addWidget(self.title_inp)
         
-        # --- 标签输入 ---
+        # --- 标签输入 (带智能补全) ---
         left_panel.addWidget(QLabel('🏷️ 标签 (智能补全)'))
         self.tags_inp = QLineEdit()
         self.tags_inp.setPlaceholderText("使用逗号分隔，如: 工作, 待办")
         self.tags_inp.setFixedHeight(40)
         
+        # 初始化补全器
         self._init_completer()
         
         left_panel.addWidget(self.tags_inp)
@@ -293,12 +299,14 @@ class EditDialog(BaseDialog):
             
         left_panel.addLayout(color_layout)
         
+        # 【核心修复】智能默认颜色复选框
         self.chk_set_default = QCheckBox("设为默认颜色")
         self.chk_set_default.setStyleSheet(f"""
             QCheckBox {{ color: {COLORS['text_sub']}; font-size: 12px; margin-top: 5px; }}
             QCheckBox::indicator {{ width: 14px; height: 14px; border: 1px solid #555; border-radius: 3px; background: transparent; }}
             QCheckBox::indicator:checked {{ background-color: {COLORS['primary']}; border-color: {COLORS['primary']}; }}
         """)
+        # 【新增】如果当前颜色是已保存的默认颜色，自动勾选
         if self.is_using_saved_default:
             self.chk_set_default.setChecked(True)
         
@@ -319,10 +327,11 @@ class EditDialog(BaseDialog):
         right_panel.setContentsMargins(5, 5, 5, 5)
         right_panel.setSpacing(10)
         
-        # 工具栏
+        # 工具栏 (标题 + 功能按钮)
         header_layout = QHBoxLayout()
         header_layout.addWidget(QLabel('📝 详细内容'))
         
+        # --- 基本编辑按钮 ---
         btn_style = """
             QPushButton { background: transparent; border: 1px solid #444; border-radius: 4px; color: #ccc; margin-left: 2px; }
             QPushButton:hover { background-color: #444; color: white; }
@@ -345,17 +354,14 @@ class EditDialog(BaseDialog):
         _create_tool_btn("•", "无序列表", lambda: self.content_inp.toggle_list(QTextListFormat.ListDisc))
         _create_tool_btn("1.", "有序列表", lambda: self.content_inp.toggle_list(QTextListFormat.ListDecimal))
         _create_tool_btn("🧹", "清除格式", lambda: self.content_inp.setCurrentCharFormat(QTextCharFormat()))
-        
-        # JSON 格式化按钮
-        header_layout.addSpacing(5)
-        _create_tool_btn("{}", "格式化 JSON", self._format_json_content)
 
         header_layout.addStretch()
         
+        # 高亮按钮组
         highlight_colors = [
             ('#c0392b', '🔴'), # 红
             ('#d35400', '🟠'), # 橙
-            ('#f1c40f', '🟡'), # 黄
+            ('#f1c40f', '🟡'), # 黄 (注意: 暗色下可能需要深一点，这里用金黄色)
             ('#27ae60', '🟢'), # 绿
             ('#2980b9', '🔵'), # 蓝
             ('#8e44ad', '🟣'), # 紫
@@ -367,6 +373,7 @@ class EditDialog(BaseDialog):
             btn.setFixedSize(24, 24)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setToolTip("清除高亮" if color is None else "高亮文字")
+            # 按钮样式
             btn.setStyleSheet(f"""
                 QPushButton {{ 
                     background-color: transparent; 
@@ -431,9 +438,7 @@ class EditDialog(BaseDialog):
             }
         """)
         
-        # 启用代码高亮
-        self.highlighter = SimpleHighlighter(self.content_inp.document())
-        
+        # 绑定 Ctrl+F
         shortcut_search = QShortcut(QKeySequence("Ctrl+F"), self.content_inp)
         shortcut_search.activated.connect(self._toggle_search_bar)
         
@@ -453,18 +458,6 @@ class EditDialog(BaseDialog):
         QShortcut(QKeySequence("Ctrl+W"), self, self.close)
         
         self._set_color(self.selected_color)
-
-    def _format_json_content(self):
-        text = self.content_inp.toPlainText()
-        if not text: return
-        try:
-            parsed = json.loads(text)
-            formatted = json.dumps(parsed, indent=4, ensure_ascii=False)
-            self.content_inp.setText(formatted)
-            if hasattr(self, 'highlighter'):
-                self.highlighter.rehighlight()
-        except json.JSONDecodeError:
-            QMessageBox.warning(self, "格式化失败", "内容不是有效的 JSON 格式。")
 
     def _get_resize_area(self, pos):
         x, y = pos.x(), pos.y()
@@ -549,6 +542,7 @@ class EditDialog(BaseDialog):
             self.btn_max.setText('□')
             self.outer_layout.setContentsMargins(15, 15, 15, 15)
             
+            # 恢复圆角样式
             self.content_container.setStyleSheet(f"""
                 #DialogContainer {{
                     background-color: {COLORS['bg_dark']};
@@ -569,6 +563,7 @@ class EditDialog(BaseDialog):
             self.btn_max.setText('❐')
             self.outer_layout.setContentsMargins(0, 0, 0, 0)
             
+            # 去除圆角样式（直角）
             self.content_container.setStyleSheet(f"""
                 #DialogContainer {{
                     background-color: {COLORS['bg_dark']};
@@ -587,6 +582,7 @@ class EditDialog(BaseDialog):
     def _set_color(self, color):
         self.selected_color = color
         
+        # 【新增】智能更新复选框状态
         saved_default = load_setting('user_default_color')
         if saved_default == color:
             self.chk_set_default.setChecked(True)
@@ -602,6 +598,7 @@ class EditDialog(BaseDialog):
                 new_style = f"background-color: {bg}; border-radius: 17px; border: 2px solid transparent;"
             btn.setStyleSheet(f"QPushButton {{ {new_style} }}")
 
+    # --- 智能标签补全逻辑 ---
     def _init_completer(self):
         all_tags = self.db.get_all_tags()
         self.completer = QCompleter(all_tags, self)
@@ -616,6 +613,7 @@ class EditDialog(BaseDialog):
         cursor_pos = self.tags_inp.cursorPosition()
         text_before = text[:cursor_pos]
         
+        # 找到当前正在输入的标签片段（最后一个逗号后）
         last_comma = text_before.rfind(',')
         if last_comma != -1:
             prefix = text_before[last_comma+1:].strip()
@@ -625,6 +623,7 @@ class EditDialog(BaseDialog):
         if prefix:
             self.completer.setCompletionPrefix(prefix)
             if self.completer.completionCount() > 0:
+                # 弹出建议列表
                 cr = self.tags_inp.cursorRect()
                 cr.setWidth(self.completer.popup().sizeHintForColumn(0) + self.completer.popup().verticalScrollBar().sizeHint().width())
                 self.completer.complete(cr)
@@ -634,6 +633,7 @@ class EditDialog(BaseDialog):
             self.completer.popup().hide()
 
     def _on_completion_activated(self, text):
+        # 替换当前输入的片段为完整标签
         current_text = self.tags_inp.text()
         cursor_pos = self.tags_inp.cursorPosition()
         
@@ -643,12 +643,15 @@ class EditDialog(BaseDialog):
         start_replace = last_comma + 1 if last_comma != -1 else 0
         
         prefix = current_text[:start_replace]
+        # 保留光标后的内容(如果有)
         suffix = current_text[cursor_pos:]
         
         new_text = prefix + text + ", " + suffix
         self.tags_inp.setText(new_text)
+        # 移动光标到新标签后
         self.tags_inp.setCursorPosition(len(prefix) + len(text) + 2)
 
+    # --- 搜索功能 ---
     def _toggle_search_bar(self):
         self.search_bar.setVisible(not self.search_bar.isVisible())
         if self.search_bar.isVisible():
@@ -664,9 +667,11 @@ class EditDialog(BaseDialog):
         
         found = self.content_inp.find(text)
         if not found:
+            # 循环查找: 移到开头再查一次
             curr = self.content_inp.textCursor()
             self.content_inp.moveCursor(QTextCursor.Start)
             if not self.content_inp.find(text):
+                # 确实没找到，恢复光标
                 self.content_inp.setTextCursor(curr)
 
     def _find_prev(self):
@@ -675,6 +680,7 @@ class EditDialog(BaseDialog):
         
         found = self.content_inp.find(text, QTextDocument.FindBackward)
         if not found:
+            # 循环查找: 移到结尾再查一次
             curr = self.content_inp.textCursor()
             self.content_inp.moveCursor(QTextCursor.End)
             if not self.content_inp.find(text, QTextDocument.FindBackward):
@@ -684,13 +690,14 @@ class EditDialog(BaseDialog):
         d = self.db.get_idea(self.idea_id, include_blob=True)
         if d:
             self.title_inp.setText(d[1])
-            # 索引: 0:id, 1:title, 2:content, 3:color, 4:pinned, 5:fav, 6:created, 7:updated, 8:cat_id, 9:is_deleted, 10:item_type, 11:data_blob
+            # 索引修正: include_blob=True 时使用 SELECT *，字段顺序如下：
+            # 0:id, 1:title, 2:content, 3:color, 4:pinned, 5:fav, 6:created, 7:updated, 8:cat_id, 9:is_deleted, 10:item_type, 11:data_blob
             item_type = d[10] if len(d) > 10 else 'text'
             
             if item_type != 'image':
                 self.content_inp.setText(d[2])
             else:
-                self.content_inp.clear() 
+                self.content_inp.clear() # 图片模式不显示文字正文
             
             self._set_color(d[3])
             self.category_id = d[8]
@@ -716,6 +723,7 @@ class EditDialog(BaseDialog):
         content = self.content_inp.toPlainText()
         color = self.selected_color
         
+        # 【核心修复】智能保存默认颜色
         if self.chk_set_default.isChecked():
             save_setting('user_default_color', color)
         
@@ -724,6 +732,7 @@ class EditDialog(BaseDialog):
         if data_blob:
             item_type = 'image'
 
+        # 获取当前选中的分区ID
         cat_id = self.category_combo.currentData()
 
         if self.idea_id:
