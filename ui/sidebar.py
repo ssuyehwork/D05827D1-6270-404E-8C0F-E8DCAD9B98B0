@@ -342,10 +342,8 @@ class Sidebar(QTreeWidget):
             color_name = color.name()
             self.db.set_category_color(cat_id, color_name)
             
-            # 直接更新当前项的图标，而不是刷新整个树
-            item = self.currentItem()
-            if item and item.data(0, Qt.UserRole) == ('category', cat_id):
-                item.setIcon(0, self._create_color_icon(color_name))
+            self.refresh()
+            self.data_changed.emit()
 
     def _set_random_color(self, cat_id):
         r = random.randint(0, 255)
@@ -363,9 +361,8 @@ class Sidebar(QTreeWidget):
         color_name = color.name()
         self.db.set_category_color(cat_id, color_name)
         
-        item = self.currentItem()
-        if item and item.data(0, Qt.UserRole) == ('category', cat_id):
-            item.setIcon(0, self._create_color_icon(color_name))
+        self.refresh()
+        self.data_changed.emit()
 
     def _request_new_data(self, cat_id):
         self.new_data_requested.emit(cat_id)

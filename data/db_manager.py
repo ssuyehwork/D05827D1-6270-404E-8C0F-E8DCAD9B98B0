@@ -424,8 +424,38 @@ class DatabaseManager:
     
     def set_category_color(self, cat_id, color):
         c = self.conn.cursor()
-        c.execute('UPDATE categories SET color=? WHERE id=?', (color, cat_id))
-        self.conn.commit()
+        try:
+            # Step 1: Find all relevant category IDs (the given one + all descendants)
+            find_ids_query = """
+                WITH RECURSIVE category_tree(id) AS (
+                    SELECT ?
+                    UNION ALL
+                    SELECT c.id FROM categories c JOIN category_tree ct ON c.parent_id = ct.id
+                )
+                SELECT id FROM category_tree;
+            """
+            c.execute(find_ids_query, (cat_id,))
+            all_ids = [row[0] for row in c.fetchall()]
+
+            if not all_ids:
+                return
+
+            # Step 2: Create placeholders for the UPDATE queries
+            placeholders = ','.join('?' * len(all_ids))
+
+            # Step 3: Update all ideas in those categories
+            update_ideas_query = f"UPDATE ideas SET color = ? WHERE category_id IN ({placeholders})"
+            c.execute(update_ideas_query, (color, *all_ids))
+
+            # Step 4: Update all the categories themselves
+            update_categories_query = f"UPDATE categories SET color = ? WHERE id IN ({placeholders})"
+            c.execute(update_categories_query, (color, *all_ids))
+
+            self.conn.commit()
+        except Exception as e:
+            self.conn.rollback()
+            # In a real app, you'd want to log this error.
+            print(f"Error during recursive category color update: {e}")
 
     def set_category_preset_tags(self, cat_id, tags_str):
         c = self.conn.cursor()
