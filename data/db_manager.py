@@ -245,6 +245,26 @@ class DatabaseManager:
     def set_favorite(self, iid, state):
         c = self.conn.cursor()
         c.execute('UPDATE ideas SET is_favorite=? WHERE id=?', (1 if state else 0, iid))
+        
+        if state:
+            # When bookmarking, set the color to the bookmark color.
+            bookmark_color = '#ff6b81'
+            c.execute('UPDATE ideas SET color=? WHERE id=?', (bookmark_color, iid))
+        else:
+            # When un-bookmarking, revert the color based on its category.
+            c.execute('SELECT category_id FROM ideas WHERE id=?', (iid,))
+            res = c.fetchone()
+            if res and res[0] is not None:
+                cat_id = res[0]
+                c.execute('SELECT color FROM categories WHERE id=?', (cat_id,))
+                cat_res = c.fetchone()
+                if cat_res:
+                    c.execute('UPDATE ideas SET color=? WHERE id=?', (cat_res[0], iid))
+            else:
+                # If no category, revert to the default uncategorized color.
+                uncat_color = COLORS.get('uncategorized', '#0A362F')
+                c.execute('UPDATE ideas SET color=? WHERE id=?', (uncat_color, iid))
+
         self.conn.commit()
 
     def set_rating(self, idea_id, rating):
@@ -343,7 +363,7 @@ class DatabaseManager:
             else: q += ' AND i.category_id=?'; p.append(f_val)
         elif f_type == 'today': q += " AND date(i.updated_at,'localtime')=date('now','localtime')"
         elif f_type == 'untagged': q += ' AND i.id NOT IN (SELECT idea_id FROM idea_tags)'
-        elif f_type == 'favorite': q += ' AND i.is_favorite=1'
+        elif f_type == 'bookmark': q += ' AND i.is_favorite=1'
         
         if tag_filter:
             q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = ?))"
@@ -380,7 +400,7 @@ class DatabaseManager:
             else: q += ' AND i.category_id=?'; p.append(f_val)
         elif f_type == 'today': q += " AND date(i.updated_at,'localtime')=date('now','localtime')"
         elif f_type == 'untagged': q += ' AND i.id NOT IN (SELECT idea_id FROM idea_tags)'
-        elif f_type == 'favorite': q += ' AND i.is_favorite=1'
+        elif f_type == 'bookmark': q += ' AND i.is_favorite=1'
         
         if tag_filter:
             q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = ?))"
@@ -504,7 +524,7 @@ class DatabaseManager:
             'today': "(is_deleted=0 OR is_deleted IS NULL) AND date(updated_at,'localtime')=date('now','localtime')",
             'uncategorized': "(is_deleted=0 OR is_deleted IS NULL) AND category_id IS NULL",
             'untagged': "(is_deleted=0 OR is_deleted IS NULL) AND id NOT IN (SELECT idea_id FROM idea_tags)",
-            'favorite': "(is_deleted=0 OR is_deleted IS NULL) AND is_favorite=1",
+            'bookmark': "(is_deleted=0 OR is_deleted IS NULL) AND is_favorite=1",
             'trash': "is_deleted=1"
         }
         for k, v in queries.items():
@@ -566,7 +586,7 @@ class DatabaseManager:
         counts['clipboard'] = c.fetchone()[0]
 
         c.execute("SELECT COUNT(*) FROM ideas WHERE is_favorite=1 AND is_deleted=0")
-        counts['favorite'] = c.fetchone()[0]
+        counts['bookmark'] = c.fetchone()[0]
 
         return counts
     

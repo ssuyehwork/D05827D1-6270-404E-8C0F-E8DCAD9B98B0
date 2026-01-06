@@ -90,7 +90,7 @@ class Sidebar(QTreeWidget):
                 ("今日数据", 'today', 'today.svg'),
                 ("未分类", 'uncategorized', 'uncategorized.svg'),
                 ("未标签", 'untagged', 'untagged.svg'),
-                ("收藏", 'favorite', 'favorite.svg'),
+                ("书签", 'bookmark', 'bookmark.svg'),
                 ("回收站", 'trash', 'trash.svg')
             ]
 
@@ -169,7 +169,7 @@ class Sidebar(QTreeWidget):
         item = self.itemAt(e.pos())
         if item:
             d = item.data(0, Qt.UserRole)
-            if d and d[0] in ['category', 'trash', 'favorite', 'uncategorized']:
+            if d and d[0] in ['category', 'trash', 'bookmark', 'uncategorized']:
                 self.setCurrentItem(item)
                 e.accept()
                 return
@@ -202,7 +202,7 @@ class Sidebar(QTreeWidget):
                     if key == 'category': self.db.move_category(iid, val)
                     elif key == 'uncategorized': self.db.move_category(iid, None)
                     elif key == 'trash': self.db.set_deleted(iid, True)
-                    elif key == 'favorite': self.db.set_favorite(iid, True)
+                    elif key == 'bookmark': self.db.set_favorite(iid, True)
                 
                 self.data_changed.emit()
                 self.refresh()

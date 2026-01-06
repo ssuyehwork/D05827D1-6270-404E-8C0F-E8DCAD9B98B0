@@ -81,7 +81,7 @@ class IdeaCard(QFrame):
         is_favorite = self.data[5]
 
         if rating > 0:
-            self.rating_label.setText(f"{'★'*rating}{'☆'*(5-rating)}")
+            self.rating_label.setText(f"{'★'*rating}")
             self.rating_label.setStyleSheet(f"background:transparent; font-size:12px; color: {COLORS['warning']};")
             self.rating_label.show()
         else:
@@ -91,6 +91,7 @@ class IdeaCard(QFrame):
         self.lock_icon.setVisible(bool(is_locked))
         self.pin_icon.setStyleSheet("background:transparent; font-size:12px;")
         self.pin_icon.setVisible(bool(is_pinned))
+        self.fav_icon.setText("🔖")
         self.fav_icon.setStyleSheet("background:transparent; font-size:12px;")
         self.fav_icon.setVisible(bool(is_favorite))
 

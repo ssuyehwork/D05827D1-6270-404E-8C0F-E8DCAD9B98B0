@@ -269,6 +269,10 @@ class MainWindow(QWidget):
         
         # 【新增】Ctrl+S 锁定/解锁快捷键
         QShortcut(QKeySequence("Ctrl+S"), self, self._do_lock)
+
+        # 【新增】星级评分快捷键 Ctrl+0 到 Ctrl+5
+        for i in range(6):
+            QShortcut(QKeySequence(f"Ctrl+{i}"), self, lambda r=i: self._do_set_rating(r))
         
         self.space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
         self.space_shortcut.setContext(Qt.WindowShortcut)
@@ -444,7 +448,7 @@ class MainWindow(QWidget):
         act_bar.addStretch()
         
         self.btns = {}
-        for k, i, f in [('pin','📌',self._do_pin), ('fav','⭐',self._do_fav), ('edit','✏️',self._do_edit),
+        for k, i, f in [('pin','📌',self._do_pin), ('fav','🔖',self._do_fav), ('edit','✏️',self._do_edit),
                         ('del','🗑️',self._do_del), ('rest','♻️',self._do_restore), ('dest','🗑️',self._do_destroy)]:
             b = QPushButton(i)
             b.setStyleSheet(STYLES['btn_icon'])
@@ -1039,7 +1043,7 @@ class MainWindow(QWidget):
             star_group = QActionGroup(self)
             star_group.setExclusive(True)
             for i in range(1, 6):
-                action = QAction(f"{'★'*i}{'☆'*(5-i)}", self, checkable=True)
+                action = QAction(f"{'★'*i}", self, checkable=True)
                 action.triggered.connect(lambda _, r=i: self._do_set_rating(r))
                 if rating == i:
                     action.setChecked(True)
@@ -1056,7 +1060,7 @@ class MainWindow(QWidget):
                 
             menu.addSeparator()
             menu.addAction('📌 取消置顶' if data[4] else '📌 置顶', self._do_pin)
-            menu.addAction('🌟 取消收藏' if data[5] else '🌟 收藏', self._do_fav)
+            menu.addAction('🔖 取消书签' if data[5] else '🔖 添加书签', self._do_fav)
             menu.addSeparator()
             
             if not is_locked:
@@ -1112,11 +1116,17 @@ class MainWindow(QWidget):
         # 3. 执行批量更新
         self.db.set_locked(list(self.selected_ids), target_state)
         
+        # In-place update
+        for iid in self.selected_ids:
+            card = self.cards.get(iid)
+            if card:
+                new_data = self.db.get_idea(iid, include_blob=True)
+                if new_data:
+                    card.update_data(new_data)
+
         action_name = "锁定" if target_state else "解锁"
         self._show_tooltip(f"✅ 已{action_name} {len(self.selected_ids)} 项")
-        
-        # 4. 刷新界面
-        QTimer.singleShot(10, self._refresh_all)
+        self._update_ui_state()
 
     def _move_to_category(self, cat_id):
         if self.selected_ids:
@@ -1130,9 +1140,20 @@ class MainWindow(QWidget):
             if len(valid_ids) < len(self.selected_ids):
                 self._show_tooltip("⚠️ 部分项目已锁定，无法移动")
                 
+            if not valid_ids: return
+
             for iid in valid_ids:
                 self.db.move_category(iid, cat_id)
-            self._refresh_all()
+                # --- 从UI中移除卡片 ---
+                card = self.cards.pop(iid, None)
+                if card:
+                    card.hide()
+                    card.deleteLater()
+            
+            self.selected_ids.clear()
+            self._update_ui_state()
+            self.sidebar.refresh() # 刷新分类计数
+            self.sidebar._update_partition_tree() # 刷新分区计数
             if valid_ids:
                 self._show_tooltip(f'✅ 已移动 {len(valid_ids)} 项')
 
@@ -1181,10 +1202,10 @@ class MainWindow(QWidget):
             d = self.db.get_idea(idea_id)
             if d:
                 self.btns['pin'].setText('📍' if not d[4] else '📌')
-                self.btns['fav'].setText('☆' if not d[5] else '⭐')
+                self.btns['fav'].setText('🔖' if d[5] else '🔖') # 保持图标一致
         else:
             self.btns['pin'].setText('📌')
-            self.btns['fav'].setText('⭐')
+            self.btns['fav'].setText('🔖')
         # 【关键修复】异步刷新标签面板
         QTimer.singleShot(0, self._refresh_tag_panel)
 
@@ -1233,17 +1254,31 @@ class MainWindow(QWidget):
 
     def _do_fav(self):
         if self.selected_ids:
+            # 智能批量切换：如果其中任何一个没有加书签，则全部设为书签
+            # 只有当全部都已加书签时，才全部取消书签
+            any_not_favorited = False
+            all_data = []
             for iid in self.selected_ids:
-                self.db.toggle_field(iid, 'is_favorite')
+                data = self.db.get_idea(iid)
+                if data and not data[5]: # data[5] is is_favorite
+                    any_not_favorited = True
+                all_data.append(data)
+
+            target_state = True if any_not_favorited else False
+
+            for iid in self.selected_ids:
+                self.db.set_favorite(iid, target_state)
             
-            # --- 关键修复：只刷新受影响的卡片 ---
+            # In-place update
             for iid in self.selected_ids:
                 card = self.cards.get(iid)
                 if card:
                     new_data = self.db.get_idea(iid, include_blob=True)
                     if new_data:
                         card.update_data(new_data)
+
             self._update_ui_state()
+            self.sidebar.refresh() # --- 关键修复：刷新侧边栏计数 ---
 
     def _do_del(self):
         if self.selected_ids:
@@ -1259,24 +1294,48 @@ class MainWindow(QWidget):
             
             if not valid_ids: return
 
-            for iid in valid_ids: self.db.set_deleted(iid, True)
+            for iid in valid_ids:
+                self.db.set_deleted(iid, True)
+                # --- 从UI中移除卡片 ---
+                card = self.cards.pop(iid, None)
+                if card:
+                    card.hide()
+                    card.deleteLater()
+            
             self.selected_ids.clear()
-            # 【关键修复】使用 Timer 延迟刷新，解决信号风暴闪退
-            QTimer.singleShot(10, self._refresh_all)
+            self._update_ui_state()
+            self.sidebar.refresh() # --- 关键修复：刷新侧边栏计数 ---
+            self._show_tooltip(f"✅ 已移动 {len(valid_ids)} 项到回收站")
 
     def _do_restore(self):
         if self.selected_ids:
-            for iid in self.selected_ids: self.db.set_deleted(iid, False)
+            count = len(self.selected_ids)
+            for iid in self.selected_ids:
+                self.db.set_deleted(iid, False)
+                card = self.cards.pop(iid, None)
+                if card:
+                    card.hide()
+                    card.deleteLater()
             self.selected_ids.clear()
-            # 【关键修复】使用 Timer 延迟刷新，解决信号风暴闪退
-            QTimer.singleShot(10, self._refresh_all)
+            self._update_ui_state()
+            self.sidebar.refresh()
+            self._show_tooltip(f"✅ 已恢复 {count} 项")
 
     def _do_destroy(self):
-        if self.selected_ids and QMessageBox.Yes == QMessageBox.warning(self, '⚠️ 警告', f'确定永久删除选中的 {len(self.selected_ids)} 项?\n此操作不可恢复!', QMessageBox.Yes | QMessageBox.No):
-            for iid in self.selected_ids: self.db.delete_permanent(iid)
-            self.selected_ids.clear()
-            # 【关键修复】使用 Timer 延迟刷新，解决信号风暴闪退
-            QTimer.singleShot(10, self._refresh_all)
+        if self.selected_ids:
+            msg = f'确定永久删除选中的 {len(self.selected_ids)} 项?\n此操作不可恢复!'
+            if self._show_custom_confirm_dialog("永久删除", msg):
+                count = len(self.selected_ids)
+                for iid in self.selected_ids:
+                    self.db.delete_permanent(iid)
+                    card = self.cards.pop(iid, None)
+                    if card:
+                        card.hide()
+                        card.deleteLater()
+                self.selected_ids.clear()
+                self._update_ui_state()
+                self.sidebar.refresh()
+                self._show_tooltip(f"✅ 已永久删除 {count} 项")
 
     def _refresh_all(self):
         # 【关键保护】如果正在清理旧控件，不要重入

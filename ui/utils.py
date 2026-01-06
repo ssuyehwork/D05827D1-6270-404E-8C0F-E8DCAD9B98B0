@@ -15,7 +15,7 @@ _icon_theme_colors = {
     'today.svg':         '#2ecc71',
     'uncategorized.svg': '#e67e22',
     'untagged.svg':      '#95a5a6',
-    'favorite.svg':      '#f1c40f',
+    'bookmark.svg':      '#ff6b81',
     'trash.svg':         '#e74c3c'
 }
 
@@ -52,10 +52,11 @@ _system_icons = {
             <path d="M20.59 13.41L13.42 20.58C12.64 21.36 11.37 21.36 10.59 20.58L2 12V2H12L20.59 10.59C21.37 11.37 21.37 12.63 20.59 13.41Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"/>
             <circle cx="7" cy="7" r="1.5" fill="currentColor"/>
         </svg>""",
-    'favorite.svg': """
+    'bookmark.svg': """
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 17.27L18.18 21L16.54 13.97L22 9.24L14.81 8.62L12 2L9.19 8.62L2 9.24L7.45 13.97L5.82 21L12 17.27Z" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M19 2L20 4L22 5L20 6L19 8L18 6L16 5L18 4L19 2Z" fill="currentColor"/>
+            <path d="M19 21L12 17L5 21V5C5 3.89543 5.89543 3 7 3H17C18.1046 3 19 3.89543 19 5V21Z" fill="currentColor" fill-opacity="0.2"/>
+            <path d="M19 21L12 17L5 21V5C5 3.89543 5.89543 3 7 3H17C18.1046 3 19 3.89543 19 5V21Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <line x1="8" y1="7" x2="16" y2="7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>""",
     'trash.svg': """
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
