@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 # ui/sidebar.py
 import random
+import os
 from PyQt5.QtWidgets import (QTreeWidget, QTreeWidgetItem, QMenu, QMessageBox, QInputDialog, 
                              QFrame, QColorDialog, QDialog, QVBoxLayout, QLabel, QLineEdit, 
-                             QPushButton, QHBoxLayout, QApplication, QWidget)
+                             QPushButton, QHBoxLayout, QApplication, QWidget, QStyle)
 from PyQt5.QtCore import Qt, pyqtSignal, QSize, QEvent, QTimer
 from PyQt5.QtGui import QFont, QColor, QPixmap, QPainter, QIcon, QCursor
 from core.config import COLORS
 from ui.advanced_tag_selector import AdvancedTagSelector
+from ui.utils import create_svg_icon
 
 class ClickableLineEdit(QLineEdit):
     doubleClicked = pyqtSignal()
@@ -27,26 +29,26 @@ class Sidebar(QTreeWidget):
         self.setIndentation(15)
         
         self.setCursor(Qt.ArrowCursor)
-        
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(self.InternalMove)
 
+        # 稍微调整 CSS，让图标和文字更协调
         self.setStyleSheet(f"""
             QTreeWidget {{
                 background-color: {COLORS['bg_mid']};
-                color: #ddd;
+                color: #e0e0e0;
                 border: none;
                 font-size: 13px;
-                padding: 2px;
+                padding: 4px;
                 outline: none;
             }}
             QTreeWidget::item {{
-                height: 24px;
+                height: 28px; /* 增加高度，给图标留呼吸空间 */
                 padding: 1px 4px;
-                border-radius: 4px;
-                margin-bottom: 0px;
+                border-radius: 6px;
+                margin-bottom: 2px;
             }}
             QTreeWidget::item:hover {{
                 background-color: #2a2d2e;
@@ -55,27 +57,12 @@ class Sidebar(QTreeWidget):
                 background-color: #37373d;
                 color: white;
             }}
-            
-            QScrollBar:vertical {{
-                border: none;
-                background: transparent;
-                width: 6px;
-                margin: 0px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: #444;
-                border-radius: 3px;
-                min-height: 20px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: #555;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-                background: none;
-            }}
+            /* 滚动条样式保持不变 */
+            QScrollBar:vertical {{ border: none; background: transparent; width: 6px; margin: 0px; }}
+            QScrollBar::handle:vertical {{ background: #444; border-radius: 3px; min-height: 20px; }}
+            QScrollBar::handle:vertical:hover {{ background: #555; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
         """)
 
         self.itemClicked.connect(self._on_click)
@@ -88,48 +75,48 @@ class Sidebar(QTreeWidget):
         super().enterEvent(event)
 
     def refresh(self):
-        """异步刷新，防止闪退"""
         QTimer.singleShot(10, self.refresh_sync)
 
     def refresh_sync(self):
-        """实际执行刷新的逻辑"""
         self.blockSignals(True)
         try:
             self.clear()
             self.setColumnCount(1)
             counts = self.db.get_counts()
 
+            # 系统菜单列表
             system_menu_items = [
-                ("全部数据", 'all', '🗂️'), ("今日数据", 'today', '📅'),
-                ("剪贴板数据", 'clipboard', '📋'),
-                ("未分类", 'uncategorized', '⚠️'), ("未标签", 'untagged', '🏷️'),
-                ("收藏", 'favorite', '⭐'), ("回收站", 'trash', '🗑️')
+                ("全部数据", 'all', 'all_data.svg'),
+                ("今日数据", 'today', 'today.svg'),
+                ("未分类", 'uncategorized', 'uncategorized.svg'),
+                ("未标签", 'untagged', 'untagged.svg'),
+                ("收藏", 'favorite', 'favorite.svg'),
+                ("回收站", 'trash', 'trash.svg')
             ]
 
-            for name, key, icon in system_menu_items:
-                item = QTreeWidgetItem(self, [f"{icon}  {name} ({counts.get(key, 0)})"])
+            for name, key, icon_filename in system_menu_items:
+                item = QTreeWidgetItem(self, [f"{name} ({counts.get(key, 0)})"])
+                item.setIcon(0, create_svg_icon(icon_filename))
                 item.setData(0, Qt.UserRole, (key, None))
-                item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled)
+                item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled) # 禁止拖拽系统图标
                 item.setExpanded(False)
 
+            # 分割线
             sep_item = QTreeWidgetItem(self)
             sep_item.setFlags(Qt.NoItemFlags)
             sep_item.setSizeHint(0, QSize(0, 16)) 
-            
             container = QWidget()
             container.setStyleSheet("background: transparent;")
-            
             layout = QVBoxLayout(container)
             layout.setContentsMargins(10, 0, 10, 0)
             layout.setAlignment(Qt.AlignCenter)
-            
             line = QFrame()
             line.setFixedHeight(1) 
             line.setStyleSheet("background-color: #505050; border: none;") 
-            
             layout.addWidget(line)
             self.setItemWidget(sep_item, 0, container)
 
+            # 用户分区
             user_partitions_root = QTreeWidgetItem(self, ["🗃️ 我的分区"])
             user_partitions_root.setFlags(user_partitions_root.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsDragEnabled)
             font = user_partitions_root.font(0)

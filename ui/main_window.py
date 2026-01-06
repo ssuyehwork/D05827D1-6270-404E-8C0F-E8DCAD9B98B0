@@ -1020,21 +1020,35 @@ class MainWindow(QWidget):
         
         in_trash = (self.curr_filter[0] == 'trash')
         
-        # 【新增】锁定状态检测
         is_locked = data[13] if len(data) > 13 else 0
+        rating = data[14] if len(data) > 14 else 0
         
         if not in_trash:
-            # 根据锁定状态显示不同菜单
             if not is_locked:
                 menu.addAction('✏️ 编辑', self._do_edit)
             else:
                 edit_action = menu.addAction('✏️ 编辑 (已锁定)')
-                edit_action.setEnabled(False) # 禁用编辑
+                edit_action.setEnabled(False)
                 
             menu.addAction('📋 提取(Ctrl+T)', lambda: self._extract_single(idea_id))
             menu.addSeparator()
             
-            # 【新增】锁定/解锁选项
+            # --- 星级评价 ---
+            rating_menu = menu.addMenu("⭐ 设置星级")
+            from PyQt5.QtWidgets import QAction, QActionGroup # 临时导入
+            star_group = QActionGroup(self)
+            star_group.setExclusive(True)
+            for i in range(1, 6):
+                action = QAction(f"{'★'*i}{'☆'*(5-i)}", self, checkable=True)
+                action.triggered.connect(lambda _, r=i: self._do_set_rating(r))
+                if rating == i:
+                    action.setChecked(True)
+                rating_menu.addAction(action)
+                star_group.addAction(action)
+            rating_menu.addSeparator()
+            action_clear_rating = rating_menu.addAction("清除评级")
+            action_clear_rating.triggered.connect(lambda: self._do_set_rating(0))
+
             if is_locked:
                 menu.addAction('🔓 解锁', self._do_lock)
             else:
@@ -1042,10 +1056,9 @@ class MainWindow(QWidget):
                 
             menu.addSeparator()
             menu.addAction('📌 取消置顶' if data[4] else '📌 置顶', self._do_pin)
-            menu.addAction('☆ 取消收藏' if data[5] else '⭐ 收藏', self._do_fav)
+            menu.addAction('🌟 取消收藏' if data[5] else '🌟 收藏', self._do_fav)
             menu.addSeparator()
             
-            # 锁定状态下禁止移动和删除
             if not is_locked:
                 cat_menu = menu.addMenu('📂 移动到分类')
                 cat_menu.addAction('⚠️ 未分类', lambda: self._move_to_category(None))
@@ -1064,7 +1077,22 @@ class MainWindow(QWidget):
         card = self.cards.get(idea_id)
         if card: menu.exec_(card.mapToGlobal(pos))
 
-    # 【新增】智能批量锁定/解锁逻辑
+    def _do_set_rating(self, rating):
+        if not self.selected_ids: return
+        
+        for idea_id in self.selected_ids:
+            self.db.set_rating(idea_id, rating)
+        
+        # --- 关键修复：只刷新受影响的卡片 ---
+        for idea_id in self.selected_ids:
+            card_widget = self.cards.get(idea_id)
+            if card_widget:
+                new_data = self.db.get_idea(idea_id, include_blob=True)
+                if new_data:
+                    card_widget.update_data(new_data)
+                    
+        self._show_tooltip(f"✅ 已设置 {len(self.selected_ids)} 项的评级")
+
     def _do_lock(self):
         if not self.selected_ids: return
         
@@ -1205,8 +1233,17 @@ class MainWindow(QWidget):
 
     def _do_fav(self):
         if self.selected_ids:
-            for iid in self.selected_ids: self.db.toggle_field(iid, 'is_favorite')
-            self._refresh_all()
+            for iid in self.selected_ids:
+                self.db.toggle_field(iid, 'is_favorite')
+            
+            # --- 关键修复：只刷新受影响的卡片 ---
+            for iid in self.selected_ids:
+                card = self.cards.get(iid)
+                if card:
+                    new_data = self.db.get_idea(iid, include_blob=True)
+                    if new_data:
+                        card.update_data(new_data)
+            self._update_ui_state()
 
     def _do_del(self):
         if self.selected_ids:

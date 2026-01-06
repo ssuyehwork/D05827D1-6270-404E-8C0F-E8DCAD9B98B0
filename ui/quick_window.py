@@ -19,6 +19,7 @@ from ui.dialogs import EditDialog
 from ui.advanced_tag_selector import AdvancedTagSelector
 from core.config import COLORS
 from core.settings import load_setting, save_setting
+from ui.utils import create_svg_icon
 
 # ... (Win32 API 定义部分保持不变) ...
 if sys.platform == "win32":
@@ -426,8 +427,8 @@ class QuickWindow(QWidget):
         idea_id = data[0]
         is_pinned = data[4]
         is_fav = data[5]
-        # 获取锁定状态
         is_locked = data[13] if len(data) > 13 else 0
+        rating = data[14] if len(data) > 14 else 0
 
         menu = QMenu(self)
         menu.setStyleSheet("""
@@ -446,6 +447,22 @@ class QuickWindow(QWidget):
         action_copy.triggered.connect(lambda: self._copy_item_content(data))
         
         menu.addSeparator()
+
+        # --- 星级评价 ---
+        rating_menu = menu.addMenu("⭐ 设置星级")
+        star_group = QActionGroup(self)
+        star_group.setExclusive(True)
+        for i in range(1, 6):
+            action = QAction(f"{'★'*i}{'☆'*(5-i)}", self, checkable=True)
+            action.triggered.connect(lambda _, r=i: self._do_set_rating(r))
+            if rating == i:
+                action.setChecked(True)
+            rating_menu.addAction(action)
+            star_group.addAction(action)
+
+        rating_menu.addSeparator()
+        action_clear_rating = rating_menu.addAction("清除评级")
+        action_clear_rating.triggered.connect(lambda: self._do_set_rating(0))
         
         # 锁定选项
         if is_locked:
@@ -456,7 +473,7 @@ class QuickWindow(QWidget):
         action_pin = menu.addAction("📌 取消置顶" if is_pinned else "📌 置顶")
         action_pin.triggered.connect(self._do_toggle_pin)
 
-        action_fav = menu.addAction("⭐ 取消收藏" if is_fav else "⭐ 收藏")
+        action_fav = menu.addAction("🌟 取消收藏" if is_fav else "🌟 收藏")
         action_fav.triggered.connect(self._do_toggle_favorite)
         
         if not is_locked:
@@ -471,6 +488,19 @@ class QuickWindow(QWidget):
             del_action.setEnabled(False)
 
         menu.exec_(self.list_widget.mapToGlobal(pos))
+
+    def _do_set_rating(self, rating):
+        item = self.list_widget.currentItem()
+        idea_id = self._get_selected_id()
+        
+        if item and idea_id:
+            self.db.set_rating(idea_id, rating)
+            
+            # --- 关键修复：只刷新当前项 ---
+            new_data = self.db.get_idea(idea_id)
+            if new_data:
+                item.setData(Qt.UserRole, new_data)
+                item.setText(self._get_content_display(new_data))
 
     def _copy_item_content(self, data):
         item_type_idx = 10
@@ -490,16 +520,21 @@ class QuickWindow(QWidget):
     
     # 锁定逻辑
     def _do_lock_selected(self):
+        item = self.list_widget.currentItem()
         iid = self._get_selected_id()
-        if not iid: return
+        if not iid or not item: return
         
         status = self.db.get_lock_status([iid])
         current_state = status.get(iid, 0)
         
         new_state = 0 if current_state else 1
         self.db.set_locked([iid], new_state)
-        
-        self._update_list()
+
+        # --- 关键修复：只刷新当前项 ---
+        new_data = self.db.get_idea(iid)
+        if new_data:
+            item.setData(Qt.UserRole, new_data)
+            item.setText(self._get_content_display(new_data))
     
     def _do_edit_selected(self):
         iid = self._get_selected_id()
@@ -538,10 +573,16 @@ class QuickWindow(QWidget):
             self._update_partition_tree()
 
     def _do_toggle_favorite(self):
+        item = self.list_widget.currentItem()
         iid = self._get_selected_id()
-        if iid:
+        if iid and item:
             self.db.toggle_field(iid, 'is_favorite')
-            self._update_list() 
+
+            # --- 关键修复：只刷新当前项 ---
+            new_data = self.db.get_idea(iid)
+            if new_data:
+                item.setData(Qt.UserRole, new_data)
+                item.setText(self._get_content_display(new_data))
 
     def _do_toggle_pin(self):
         iid = self._get_selected_id()
@@ -554,10 +595,26 @@ class QuickWindow(QWidget):
         if status.get(idea_id, 0):
             return
 
-        if cat_id == -20: 
-             self.db.set_favorite(idea_id, True)
-        else:
-             self.db.move_category(idea_id, cat_id)
+        target_item = None
+        it = QTreeWidgetItemIterator(self.partition_tree)
+        while it.value():
+            item = it.value()
+            data = item.data(0, Qt.UserRole)
+            if data and data.get('id') == cat_id:
+                target_item = item
+                break
+            it += 1
+
+        if not target_item: return
+
+        target_data = target_item.data(0, Qt.UserRole)
+        target_type = target_data.get('type')
+        
+        if target_type == 'favorite': self.db.set_favorite(idea_id, True)
+        elif target_type == 'trash': self.db.set_deleted(idea_id, True)
+        elif target_type == 'uncategorized': self.db.move_category(idea_id, None)
+        elif target_type == 'partition': self.db.move_category(idea_id, cat_id)
+
         self._update_list()
         self._update_partition_tree()
 
@@ -723,19 +780,15 @@ class QuickWindow(QWidget):
     def _update_list(self):
         search_text = self.search_box.text()
         current_partition = self.partition_tree.currentItem()
+        f_type, f_val = 'all', None
         if current_partition:
             partition_data = current_partition.data(0, Qt.UserRole)
             if partition_data:
-                if partition_data.get('type') == 'today':
-                    f_type, f_val = 'today', None
-                elif partition_data.get('type') == 'partition':
+                p_type = partition_data.get('type')
+                if p_type == 'partition':
                     f_type, f_val = 'category', partition_data.get('id')
-                else: # all
-                    f_type, f_val = 'all', None
-            else:
-                f_type, f_val = 'all', None
-        else:
-            f_type, f_val = 'all', None
+                elif p_type in ['all', 'today', 'uncategorized', 'untagged', 'favorite', 'trash']:
+                    f_type, f_val = p_type, None
 
         items = self.db.get_ideas(search=search_text, f_type=f_type, f_val=f_val)
         self.list_widget.clear()
@@ -777,12 +830,18 @@ class QuickWindow(QWidget):
         content = item_tuple[2]
         
         prefix = ""
-        # 显示锁定状态前缀
+        # 1. 星级
+        rating = item_tuple[14] if len(item_tuple) > 14 else 0
+        if rating > 0:
+            prefix += f"{'★'*rating}{'☆'*(5-rating)} "
+            
+        # 2. 锁定状态
         is_locked = item_tuple[13] if len(item_tuple) > 13 else 0
         if is_locked: prefix += "🔒 "
         
+        # 3. 置顶和收藏
         if item_tuple[4]: prefix += "📌 "
-        if item_tuple[5]: prefix += "⭐ "
+        if item_tuple[5]: prefix += "🌟 "
         
         item_type = item_tuple[10] if len(item_tuple) > 10 and item_tuple[10] else 'text'
 
@@ -815,20 +874,24 @@ class QuickWindow(QWidget):
             
         self.partition_tree.clear()
         
-        counts = self.db.get_partition_item_counts()
-        partition_counts = counts.get('partitions', {})
+        counts = self.db.get_counts()
+        partition_counts = counts.get('categories', {})
 
         static_items = [
-            ("全部数据", {'type': 'all', 'id': -1}, QStyle.SP_DirHomeIcon, counts.get('total', 0)),
-            ("今日数据", {'type': 'today', 'id': -5}, QStyle.SP_FileDialogDetailedView, counts.get('today_modified', 0)),
-            ("剪贴板数据", {'type': 'clipboard', 'id': -10}, QStyle.SP_ComputerIcon, counts.get('clipboard', 0)),
-            ("收藏", {'type': 'favorite', 'id': -20}, QStyle.SP_DialogYesButton, counts.get('favorite', 0)),
+            ("全部数据", 'all', 'all_data.svg'),
+            ("今日数据", 'today', 'today.svg'),
+            ("未分类", 'uncategorized', 'uncategorized.svg'),
+            ("未标签", 'untagged', 'untagged.svg'),
+            ("收藏", 'favorite', 'favorite.svg'),
+            ("回收站", 'trash', 'trash.svg')
         ]
         
-        for name, data, icon, count in static_items:
-            item = QTreeWidgetItem(self.partition_tree, [f"{name} ({count})"])
+        id_map = {'all': -1, 'today': -5, 'uncategorized': -15, 'untagged': -16, 'favorite': -20, 'trash': -30}
+        for name, key, icon_filename in static_items:
+            data = {'type': key, 'id': id_map.get(key)}
+            item = QTreeWidgetItem(self.partition_tree, [f"{name} ({counts.get(key, 0)})"])
             item.setData(0, Qt.UserRole, data)
-            item.setIcon(0, self.style().standardIcon(icon))
+            item.setIcon(0, create_svg_icon(icon_filename))
         
         top_level_partitions = self.db.get_partitions_tree()
         self._add_partition_recursive(top_level_partitions, self.partition_tree, partition_counts)

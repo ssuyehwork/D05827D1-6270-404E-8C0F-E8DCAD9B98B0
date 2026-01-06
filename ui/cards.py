@@ -7,169 +7,137 @@ from PyQt5.QtGui import QDrag, QPixmap, QImage
 from core.config import STYLES, COLORS
 
 class IdeaCard(QFrame):
-    # (id, is_ctrl, is_shift)
     selection_requested = pyqtSignal(int, bool, bool)
     double_clicked = pyqtSignal(int)
 
     def __init__(self, data, db, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_StyledBackground)
-        
-        self.data = data
         self.db = db
-        self.id = data[0]
         self.setCursor(Qt.PointingHandCursor)
         
-        # --- 状态变量 ---
         self._drag_start_pos = None
         self._is_potential_click = False
-        
-        # 这是一个占位符，会在 main_window 中被赋值
         self.get_selected_ids_func = None
         
-        self._init_ui()
+        self._setup_ui_structure()
+        self.update_data(data)
 
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 12, 15, 12)
-        layout.setSpacing(8) # 增加一点内部间距
-        
-        # --- 1. 顶部：标题 + 图标 ---
-        top = QHBoxLayout()
-        top.setSpacing(8)
-        
-        # 标题 (对于图片，如果标题是默认的"[图片]"，可以显示得淡一点，或者保持原样)
-        title_text = self.data[1]
-        title = QLabel(title_text)
-        title.setStyleSheet("font-size:15px; font-weight:bold; background:transparent; color:white;")
-        title.setWordWrap(False)
-        top.addWidget(title, stretch=1)
-        
-        # 图标区域 (置顶/收藏/锁定)
-        icon_layout = QHBoxLayout()
-        icon_layout.setSpacing(4)
-        
-        # 锁定状态判断: 数据列最后一位是 is_locked
-        # 假设数据列顺序: 0-id ... 13-is_locked (如果表结构是新建的)
-        # 为稳健起见，尝试获取最后一位，如果是 1 则显示锁
-        is_locked = False
-        if len(self.data) >= 14:
-            is_locked = self.data[13]
-        
-        if is_locked:
-            # U+FE0E 是一个变体选择器，它强制将表情符号呈现为文本，从而允许颜色样式生效。
-            lock_icon = QLabel('🔒\uFE0E')
-            lock_icon.setStyleSheet(f"background:transparent; font-size:12px; color: {COLORS['success']};")
-            icon_layout.addWidget(lock_icon)
+    def update_data(self, data):
+        self.data = data
+        self.id = data[0]
+        self._refresh_ui_content()
 
-        if self.data[4]:  # is_pinned
-            pin_icon = QLabel('📌')
-            pin_icon.setStyleSheet("background:transparent; font-size:12px;")
-            icon_layout.addWidget(pin_icon)
-        if self.data[5]:  # is_favorite
-            fav_icon = QLabel('⭐')
-            fav_icon.setStyleSheet("background:transparent; font-size:12px;")
-            icon_layout.addWidget(fav_icon)
-            
-        top.addLayout(icon_layout)
-        layout.addLayout(top)
+    def _setup_ui_structure(self):
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(15, 12, 15, 12)
+        self.main_layout.setSpacing(8)
+
+        # 1. Top Section
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(8)
+        self.title_label = QLabel()
+        self.title_label.setStyleSheet("font-size:15px; font-weight:bold; background:transparent; color:white;")
+        self.title_label.setWordWrap(False)
+        top_layout.addWidget(self.title_label, stretch=1)
         
-        # --- 2. 中部：内容预览 (文本 或 图片) ---
-        # 解析数据类型
-        # data结构: 0:id, 1:title, 2:content ... 10:item_type, 11:data_blob
-        item_type = self.data[10] if len(self.data) > 10 and self.data[10] else 'text'
+        self.icon_layout = QHBoxLayout()
+        self.icon_layout.setSpacing(4)
+        self.rating_label = QLabel()
+        self.lock_icon = QLabel('🔒\uFE0E')
+        self.pin_icon = QLabel('📌')
+        self.fav_icon = QLabel('🌟')
+        for icon in [self.rating_label, self.lock_icon, self.pin_icon, self.fav_icon]:
+            self.icon_layout.addWidget(icon)
+        top_layout.addLayout(self.icon_layout)
+        self.main_layout.addLayout(top_layout)
+
+        # 2. Middle Section (Content)
+        self.content_widget = QFrame() # Placeholder for text or image
+        self.content_widget.setStyleSheet("background:transparent; border:none;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0,0,0,0)
+        self.main_layout.addWidget(self.content_widget)
+
+        # 3. Bottom Section
+        bot_layout = QHBoxLayout()
+        bot_layout.setSpacing(6)
+        self.time_label = QLabel()
+        self.time_label.setStyleSheet("color:rgba(255,255,255,100); font-size:11px; background:transparent;")
+        bot_layout.addWidget(self.time_label)
+        bot_layout.addStretch()
+        self.tags_layout = QHBoxLayout()
+        self.tags_layout.setSpacing(4)
+        bot_layout.addLayout(self.tags_layout)
+        self.main_layout.addLayout(bot_layout)
+
+    def _refresh_ui_content(self):
+        # 1. Refresh Top
+        self.title_label.setText(self.data[1])
         
-        if item_type == 'image':
-            # === 图片模式 ===
-            blob_data = self.data[11] if len(self.data) > 11 else None
-            if blob_data:
-                pixmap = QPixmap()
-                pixmap.loadFromData(blob_data)
-                
-                if not pixmap.isNull():
-                    img_label = QLabel()
-                    # 限制最大显示高度，防止卡片过大
-                    max_height = 160
-                    if pixmap.height() > max_height:
-                        pixmap = pixmap.scaledToHeight(max_height, Qt.SmoothTransformation)
-                    
-                    # 如果宽度也太宽，限制宽度
-                    if pixmap.width() > 400: # 假设卡片大概这么宽
-                        pixmap = pixmap.scaledToWidth(400, Qt.SmoothTransformation)
-                        
-                    img_label.setPixmap(pixmap)
-                    img_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-                    img_label.setStyleSheet("background: transparent; border-radius: 4px;")
-                    layout.addWidget(img_label)
-                else:
-                    err_label = QLabel("[图片无法加载]")
-                    err_label.setStyleSheet("color: #666; font-style: italic;")
-                    layout.addWidget(err_label)
+        rating = self.data[14] if len(self.data) > 14 else 0
+        is_locked = self.data[13] if len(self.data) > 13 else 0
+        is_pinned = self.data[4]
+        is_favorite = self.data[5]
+
+        if rating > 0:
+            self.rating_label.setText(f"{'★'*rating}{'☆'*(5-rating)}")
+            self.rating_label.setStyleSheet(f"background:transparent; font-size:12px; color: {COLORS['warning']};")
+            self.rating_label.show()
         else:
-            # === 文本/文件模式 ===
-            if self.data[2]:
-                content_str = self.data[2].strip()
-                
-                # 获取一段较长的文本，让 Label 自动换行
-                preview_text = content_str[:300].replace('\n', ' ').replace('\r', '')
-                if len(content_str) > 300:
-                    preview_text += "..."
-                    
-                content = QLabel(preview_text)
-                content.setStyleSheet("""
-                    color: rgba(255,255,255,180); 
-                    margin-top: 2px; 
-                    background: transparent; 
-                    font-size: 13px;
-                    line-height: 1.4;
-                """)
-                content.setWordWrap(True)
-                content.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-                # 限制高度，大概显示 3 行文字的高度
-                content.setMaximumHeight(65) 
-                layout.addWidget(content)
+            self.rating_label.hide()
             
-        # --- 3. 底部：时间 + 标签 ---
-        bot = QHBoxLayout()
-        bot.setSpacing(6)
+        self.lock_icon.setStyleSheet(f"background:transparent; font-size:12px; color: {COLORS['success']};")
+        self.lock_icon.setVisible(bool(is_locked))
+        self.pin_icon.setStyleSheet("background:transparent; font-size:12px;")
+        self.pin_icon.setVisible(bool(is_pinned))
+        self.fav_icon.setStyleSheet("background:transparent; font-size:12px;")
+        self.fav_icon.setVisible(bool(is_favorite))
+
+        # 2. Refresh Middle
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         
-        # 时间
-        time_str = self.data[7][:16] # YYYY-MM-DD HH:mm
-        time_label = QLabel(f'🕒 {time_str}')
-        time_label.setStyleSheet("color:rgba(255,255,255,100); font-size:11px; background:transparent;")
-        bot.addWidget(time_label)
+        item_type = self.data[10] if len(self.data) > 10 and self.data[10] else 'text'
+        if item_type == 'image' and self.data[11]:
+            pixmap = QPixmap()
+            pixmap.loadFromData(self.data[11])
+            if not pixmap.isNull():
+                img_label = QLabel()
+                max_h = 160
+                if pixmap.height() > max_h: pixmap = pixmap.scaledToHeight(max_h, Qt.SmoothTransformation)
+                if pixmap.width() > 400: pixmap = pixmap.scaledToWidth(400, Qt.SmoothTransformation)
+                img_label.setPixmap(pixmap)
+                self.content_layout.addWidget(img_label)
+        elif self.data[2]:
+            preview_text = self.data[2].strip()[:300].replace('\n', ' ')
+            if len(self.data[2]) > 300: preview_text += "..."
+            content = QLabel(preview_text)
+            content.setStyleSheet("color: rgba(255,255,255,180); margin-top: 2px; background: transparent; font-size: 13px; line-height: 1.4;")
+            content.setWordWrap(True)
+            content.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            content.setMaximumHeight(65) 
+            self.content_layout.addWidget(content)
+
+        # 3. Refresh Bottom
+        self.time_label.setText(f'🕒 {self.data[7][:16]}')
+        while self.tags_layout.count():
+            item = self.tags_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
         
-        bot.addStretch()
-        
-        # 标签
         tags = self.db.get_tags(self.id)
-        visible_tags = tags[:3]
-        remaining = len(tags) - 3
-        
-        for tag in visible_tags:
+        for i, tag in enumerate(tags):
+            if i >= 3:
+                more_label = QLabel(f'+{len(tags) - 3}')
+                more_label.setStyleSheet(f"background: rgba(74,144,226,0.3); border-radius: 4px; padding: 2px 6px; font-size: 10px; color: {COLORS['primary']}; font-weight:bold;")
+                self.tags_layout.addWidget(more_label)
+                break
             tag_label = QLabel(f"#{tag}")
-            tag_label.setStyleSheet("""
-                background: rgba(255,255,255,0.1); 
-                border-radius: 4px; 
-                padding: 2px 6px; 
-                font-size: 10px; 
-                color: rgba(255,255,255,180);
-            """)
-            bot.addWidget(tag_label)
-            
-        if remaining > 0:
-            more_label = QLabel(f'+{remaining}')
-            more_label.setStyleSheet("""
-                background: rgba(74,144,226,0.3); 
-                border-radius: 4px; 
-                padding: 2px 6px; 
-                font-size: 10px; 
-                color: #4a90e2;
-                font-weight:bold;
-            """)
-            bot.addWidget(more_label)
-            
-        layout.addLayout(bot)
+            tag_label.setStyleSheet("background: rgba(255,255,255,0.1); border-radius: 4px; padding: 2px 6px; font-size: 10px; color: rgba(255,255,255,180);")
+            self.tags_layout.addWidget(tag_label)
+
         self.update_selection(False)
 
     def update_selection(self, selected):
