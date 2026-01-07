@@ -17,6 +17,9 @@ class IdeaCard(QFrame):
         self.db = db
         self.setCursor(Qt.PointingHandCursor)
         
+        # 设置合适的大小策略，使卡片能够适应容器
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
         self._drag_start_pos = None
         self._is_potential_click = False
         self.get_selected_ids_func = None
@@ -39,7 +42,8 @@ class IdeaCard(QFrame):
         top_layout.setSpacing(8)
         self.title_label = QLabel()
         self.title_label.setStyleSheet("font-size:15px; font-weight:bold; background:transparent; color:white;")
-        self.title_label.setWordWrap(False)
+        self.title_label.setWordWrap(True)
+        self.title_label.setContentsMargins(0, 0, 5, 0)  # 添加右边距
         top_layout.addWidget(self.title_label, stretch=1)
         
         self.icon_layout = QHBoxLayout()
@@ -149,6 +153,7 @@ class IdeaCard(QFrame):
             content.setWordWrap(True)
             content.setAlignment(Qt.AlignTop | Qt.AlignLeft)
             content.setMaximumHeight(65) 
+            content.setContentsMargins(0, 0, 0, 0)
             self.content_layout.addWidget(content)
 
         # 3. Refresh Bottom
@@ -220,7 +225,7 @@ class IdeaCard(QFrame):
         final_style = base_style + f"""
             IdeaCard {{ {border_style} }}
             IdeaCard:hover {{
-                border: 2px solid rgba(255,255,255,0.4);
+                border: 2px solid #CCCCCC; /* 改为不透明浅灰色，避免与背景叠加产生白点 */
             }}
         """
         

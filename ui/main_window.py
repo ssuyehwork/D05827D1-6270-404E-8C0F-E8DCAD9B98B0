@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QLine
                                QPushButton, QLabel, QScrollArea, QShortcut, QMessageBox,
                                QApplication, QToolTip, QMenu, QFrame, QTextEdit, QDialog,
                                QGraphicsDropShadowEffect, QLayout, QSizePolicy, QInputDialog)
-from PyQt5.QtCore import Qt, QTimer, QPoint, pyqtSignal, QRect, QSize, QByteArray
+from PyQt5.QtCore import Qt, QTimer, QPoint, pyqtSignal, QRect, QSize, QByteArray, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QKeySequence, QCursor, QColor, QIntValidator
 from core.config import STYLES, COLORS
 from core.settings import load_setting, save_setting
@@ -259,6 +259,7 @@ class MainWindow(QWidget):
         self._resize_area = None
         self._resize_start_pos = None
         self._resize_start_geometry = None
+        self.is_metadata_panel_visible = False
         
         self.current_page = 1
         self.page_size = 100
@@ -306,55 +307,74 @@ class MainWindow(QWidget):
         titlebar = self._create_titlebar()
         outer_layout.addWidget(titlebar)
         
-        main_content = QWidget()
-        main_layout = QHBoxLayout(main_content)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        # --- 布局重构 ---
         
-        # 1. 默认左侧布局：垂直 Splitter (上Sidebar, 下FilterPanel)
-        self.left_splitter = QSplitter(Qt.Vertical)
-        self.left_splitter.setHandleWidth(2)
+        # 1. 创建中央内容区
+        central_content = QWidget()
+        central_layout = QHBoxLayout(central_content)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
         
+        # 2. 创建侧边栏
         self.sidebar = Sidebar(self.db)
         self.sidebar.filter_changed.connect(self._set_filter)
         self.sidebar.data_changed.connect(self._load_data)
         self.sidebar.new_data_requested.connect(self._on_new_data_in_category_requested)
-        self.left_splitter.addWidget(self.sidebar)
+        self.sidebar.setMinimumWidth(200)  # 初始宽度（具体由 splitter 控制）
         
-        self.filter_panel = FilterPanel()
-        self.filter_panel.filterChanged.connect(self._on_filter_criteria_changed)
-        self.filter_panel.dockRequest.connect(self._on_filter_panel_dock_request) # 处理停靠请求
-        self.left_splitter.addWidget(self.filter_panel)
-        
-        self.left_splitter.setStretchFactor(0, 7)
-        self.left_splitter.setStretchFactor(1, 3)
-        
-        # 2. 主横向 Splitter
-        self.main_splitter = QSplitter(Qt.Horizontal)
-        self.main_splitter.addWidget(self.left_splitter)
-        
-        # 3. 中间列表区
+        # 3. 创建中间卡片列表区和右侧元数据面板
         middle_panel = self._create_middle_panel()
-        self.main_splitter.addWidget(middle_panel)
-        
-        # 4. 右侧元数据区
         self.metadata_panel = self._create_metadata_panel()
-        self.main_splitter.addWidget(self.metadata_panel)
+        self.metadata_panel.setMinimumWidth(0)
+        self.metadata_panel.hide()
+
+        # 使用 QSplitter 允许用户调整侧边栏宽度
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.addWidget(self.sidebar)
+
+        right_container = QWidget()
+        right_layout = QHBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        right_layout.addWidget(middle_panel, 1)
+        right_layout.addWidget(self.metadata_panel)
+
+        self.main_splitter.addWidget(right_container)
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        # 设置侧边栏为固定宽度，中间区域为可拉伸
+        self.main_splitter.setSizes([280, 100])
+        # 监听 splitter 尺寸变化，动态更新卡片宽度
+        self.main_splitter.splitterMoved.connect(self._on_splitter_moved)
         
-        self.main_splitter.setStretchFactor(0, 1) # Left
-        self.main_splitter.setStretchFactor(1, 4) # Middle
-        self.main_splitter.setStretchFactor(2, 1) # Right
+        # 将中央内容区添加到主布局
+        central_layout.addWidget(self.main_splitter)
+        outer_layout.addWidget(central_content, 1)
         
-        main_layout.addWidget(self.main_splitter)
-        outer_layout.addWidget(main_content)
+        # 5. 创建独立悬浮筛选器面板（不再添加到布局中）
+        self.filter_panel = FilterPanel()
+        self.filter_panel.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.filter_panel.setAttribute(Qt.WA_TranslucentBackground)
+        # 移除固定尺寸限制，允许用户调整大小
+        self.filter_panel.filterChanged.connect(self._on_filter_criteria_changed)
+        self.filter_panel.hide()  # 初始隐藏
         
+        # --- 快捷键 ---
         QShortcut(QKeySequence("Ctrl+T"), self, self._handle_extract_key)
         QShortcut(QKeySequence("Ctrl+N"), self, self.new_idea)
         QShortcut(QKeySequence("Ctrl+W"), self, self.close)
         QShortcut(QKeySequence("Ctrl+A"), self, self._select_all)
         QShortcut(QKeySequence("Ctrl+F"), self, self.search.setFocus)
-        QShortcut(QKeySequence("Ctrl+E"), self, self._do_fav)
-        QShortcut(QKeySequence("Ctrl+B"), self, self._do_edit)
-        QShortcut(QKeySequence("Ctrl+P"), self, self._do_pin)
+        
+        # 连接侧边栏和搜索框变化事件以重构筛选器
+        self.sidebar.filter_changed.connect(self._rebuild_filter_panel)
+        self.search.textChanged.connect(self._rebuild_filter_panel)
+        # Ctrl+B 现在用于侧边栏切换
+        QShortcut(QKeySequence("Ctrl+B"), self, self._toggle_sidebar)
+        QShortcut(QKeySequence("Ctrl+I"), self, self._toggle_metadata_panel)
+        # Ctrl+G 用于切换筛选器面板
+        QShortcut(QKeySequence("Ctrl+G"), self, self._toggle_filter_panel)
         QShortcut(QKeySequence("Delete"), self, self._handle_del_key)
         QShortcut(QKeySequence("Ctrl+S"), self, self._do_lock)
 
@@ -367,51 +387,88 @@ class MainWindow(QWidget):
 
         self._restore_window_state()
 
-    # --- 拖拽停靠逻辑 ---
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat("application/x-filter-panel"):
-            event.accept()
-        else:
-            super().dragEnterEvent(event)
+    def _toggle_sidebar(self):
+        is_collapsed = self.sidebar.width() == 60
+        target_width = 280 if is_collapsed else 60
+        
+        self.sidebar_animation = QPropertyAnimation(self.sidebar, b"minimumWidth")
+        self.sidebar_animation.setDuration(300) # 300ms 动画
+        self.sidebar_animation.setStartValue(self.sidebar.width())
+        self.sidebar_animation.setEndValue(target_width)
+        self.sidebar_animation.setEasingCurve(QEasingCurve.InOutCubic) # 缓动曲线
+        self.sidebar_animation.start()
 
-    def dropEvent(self, event):
-        if event.mimeData().hasFormat("application/x-filter-panel"):
-            # 获取放置位置的相对坐标
-            pos = event.pos()
-            # 简单判断区域：
-            # 如果在窗口左侧 1/4 区域 -> 放入左侧 Splitter
-            # 如果在窗口右侧 1/4 区域 -> 放入右侧 Metadata 区域 (需要 Metadata 支持布局插入)
-            # 否则 -> 放入中间 (作为 MainSplitter 的一列)
+    def _show_metadata_panel(self):
+        if self.is_metadata_panel_visible: return
+        self.is_metadata_panel_visible = True
+        self.metadata_panel.show()
+        
+        self.metadata_animation = QPropertyAnimation(self.metadata_panel, b"minimumWidth")
+        self.metadata_animation.setDuration(300)
+        self.metadata_animation.setStartValue(0)
+        self.metadata_animation.setEndValue(300)
+        self.metadata_animation.setEasingCurve(QEasingCurve.InOutCubic)
+        # 动画结束后重新计算卡片区域宽度，避免卡片被遮挡
+        self.metadata_animation.finished.connect(self._on_metadata_panel_animation_finished)
+        self.metadata_animation.start()
+
+    def _on_metadata_panel_animation_finished(self):
+        # 触发卡片区域重新布局，确保卡片宽度适应剩余空间
+        if hasattr(self, 'main_splitter'):
+            self.main_splitter.setSizes(self.main_splitter.sizes())
+
+    def _hide_metadata_panel(self):
+        if not self.is_metadata_panel_visible: return
+        self.is_metadata_panel_visible = False
+        
+        self.metadata_animation = QPropertyAnimation(self.metadata_panel, b"minimumWidth")
+        self.metadata_animation.setDuration(300)
+        self.metadata_animation.setStartValue(self.metadata_panel.width())
+        self.metadata_animation.setEndValue(0)
+        self.metadata_animation.setEasingCurve(QEasingCurve.InOutCubic)
+        self.metadata_animation.finished.connect(self.metadata_panel.hide)
+        self.metadata_animation.start()
+
+    def _toggle_metadata_panel(self):
+        if self.is_metadata_panel_visible:
+            self._hide_metadata_panel()
+        else:
+            self._show_metadata_panel()
+
+    def _toggle_filter_panel(self):
+        """切换筛选器面板的显示/隐藏"""
+        if self.filter_panel.isVisible():
+            self.filter_panel.hide()
+        else:
+            # 恢复保存的尺寸
+            saved_size = load_setting('filter_panel_size')
+            if saved_size and 'width' in saved_size and 'height' in saved_size:
+                self.filter_panel.resize(saved_size['width'], saved_size['height'])
             
-            w = self.width()
-            
-            # 必须先从当前父级移除，确保干净的 reparent
-            self.filter_panel.setParent(None) 
-            self.filter_panel.setWindowFlags(Qt.Widget) # 恢复为普通控件
-            
-            if pos.x() < w * 0.25:
-                # 放入左侧 Splitter (默认位置)
-                self.left_splitter.addWidget(self.filter_panel)
-            elif pos.x() > w * 0.75:
-                # 放入右侧，由于 metadata_panel 是 QWidget with VBox，我们加到它的 VBox 里
-                # 或者加到 MainSplitter 的最右侧
-                # 这里为了简单，加到 MainSplitter 最右侧
-                self.main_splitter.addWidget(self.filter_panel)
-            else:
-                # 放入中间 (Sidebar 和 List 之间)
-                self.main_splitter.insertWidget(1, self.filter_panel)
-            
+            # 先显示面板
+            # 定位到主窗口右下角
+            main_geo = self.geometry()
+            x = main_geo.right() - self.filter_panel.width() - 20
+            y = main_geo.bottom() - self.filter_panel.height() - 20
+            self.filter_panel.move(x, y)
             self.filter_panel.show()
-            event.accept()
-        else:
-            super().dropEvent(event)
+            self.filter_panel.raise_()
+            self.filter_panel.activateWindow()
+            # 然后重构内容
+            self._rebuild_filter_panel()
 
-    def _on_filter_panel_dock_request(self):
-        # 默认恢复到左侧 Splitter 底部
-        self.filter_panel.setParent(None)
-        self.filter_panel.setWindowFlags(Qt.Widget)
-        self.left_splitter.addWidget(self.filter_panel)
-        self.filter_panel.show()
+    def _rebuild_filter_panel(self):
+        """根据当前侧边栏选择和搜索框内容重构筛选器"""
+        # 获取当前过滤条件的统计数据
+        # 这里根据 curr_filter 和 search 来获取上下文相关的统计
+        print(f"[DEBUG] 重构筛选器: filter_type={self.curr_filter[0]}, filter_value={self.curr_filter[1]}, search={self.search.text()}")
+        stats = self.db.get_filter_stats(
+            search_text=self.search.text(),
+            filter_type=self.curr_filter[0],
+            filter_value=self.curr_filter[1]
+        )
+        print(f"[DEBUG] 统计结果: stars={stats['stars']}, colors={stats['colors']}, tags={len(stats['tags'])}")
+        self.filter_panel.update_stats(stats)
 
     def _select_all(self):
         if not self.cards: return
@@ -435,8 +492,26 @@ class MainWindow(QWidget):
         titlebar.setStyleSheet(f"QWidget {{ background-color: {COLORS['bg_mid']}; border-bottom: 1px solid {COLORS['bg_light']}; border-top-left-radius: 8px; border-top-right-radius: 8px; }}")
         
         layout = QHBoxLayout(titlebar)
-        layout.setContentsMargins(15, 0, 10, 0)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(8)
+        
+        # --- 侧边栏切换按钮 ---
+        self.sidebar_toggle_btn = QPushButton("☰")
+        self.sidebar_toggle_btn.setFixedSize(30, 30)
+        self.sidebar_toggle_btn.setStyleSheet(f"""
+            QPushButton {{ 
+                font-size: 16px; 
+                color: #AAA; 
+                background-color: transparent; 
+                border: none; 
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{ 
+                background-color: rgba(255, 255, 255, 0.1); 
+            }}
+        """)
+        self.sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
+        layout.addWidget(self.sidebar_toggle_btn)
         
         title = QLabel('💡 快速笔记')
         title.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a90e2;")
@@ -509,6 +584,14 @@ class MainWindow(QWidget):
         
         # --- 窗口控制按钮 (SVG) ---
         ctrl_btn_style = f"QPushButton {{ background-color: transparent; border: none; border-radius: 6px; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; }} QPushButton:hover {{ background-color: rgba(255,255,255,0.1); }}"
+        
+        # 筛选器按钮
+        filter_btn = QPushButton()
+        filter_btn.setIcon(create_svg_icon('select.svg', '#FFF'))
+        filter_btn.setToolTip('高级筛选 (Ctrl+G)')
+        filter_btn.setStyleSheet(f"QPushButton {{ background-color: {COLORS['primary']}; border: none; border-radius: 6px; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; }} QPushButton:hover {{ background-color: #357abd; }}")
+        filter_btn.clicked.connect(self._toggle_filter_panel)
+        layout.addWidget(filter_btn)
         
         extract_btn = QPushButton()
         extract_btn.setIcon(create_svg_icon('action_export.svg', '#FFF'))
@@ -620,7 +703,7 @@ class MainWindow(QWidget):
         self.list_container.cleared.connect(self._clear_all_selections)
         self.list_layout = QVBoxLayout(self.list_container)
         self.list_layout.setAlignment(Qt.AlignTop)
-        self.list_layout.setSpacing(10)
+        self.list_layout.setSpacing(7)  # 原来是 10，现在减 3 变成 7
         self.list_layout.setContentsMargins(20, 5, 20, 15)
         scroll.setWidget(self.list_container)
         layout.addWidget(scroll)
@@ -792,6 +875,22 @@ class MainWindow(QWidget):
         self.db.remove_tag_from_multiple_ideas(list(self.selected_ids), tag_name)
         self._refresh_all()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = self.width()
+
+        # 响应式规则
+        if width < 1200:
+            self._hide_metadata_panel()
+        
+        if width < 900:
+            # 如果侧边栏是展开的，则强制折叠
+            if self.sidebar.width() == 280:
+                self._toggle_sidebar()
+        
+        # 重新计算卡片宽度以适应新的窗口尺寸
+        self._update_card_widths()
+
     def _refresh_metadata_panel(self):
         num_selected = len(self.selected_ids)
 
@@ -799,15 +898,17 @@ class MainWindow(QWidget):
             self.no_selection_widget.show()
             self.multi_selection_widget.hide()
             self.metadata_display.hide()
-            self.title_input.hide() # 隐藏标题输入框
+            self.title_input.hide()
             self.tag_input.setEnabled(False)
             self.tag_input.setPlaceholderText("请先选择一个项目")
+            self._hide_metadata_panel()
         
         elif num_selected == 1:
+            self._show_metadata_panel()
             self.no_selection_widget.hide()
             self.multi_selection_widget.hide()
             self.metadata_display.show()
-            self.title_input.show() # 显示标题输入框
+            self.title_input.show()
             self.tag_input.setEnabled(True)
             self.tag_input.setPlaceholderText("输入标签添加... (双击更多)")
 
@@ -833,10 +934,11 @@ class MainWindow(QWidget):
                 self.title_input.clear()
 
         else: # num_selected > 1
+            self._hide_metadata_panel()
             self.no_selection_widget.hide()
             self.multi_selection_widget.show()
             self.metadata_display.hide()
-            self.title_input.hide() # 隐藏标题输入框
+            self.title_input.hide()
             self.tag_input.setEnabled(False)
             self.tag_input.setPlaceholderText("请仅选择一项以查看元数据")
 
@@ -910,6 +1012,8 @@ class MainWindow(QWidget):
                         new_rect.setHeight(new_height)
                 
                 self.setGeometry(new_rect)
+                # 窗口大小改变后重新计算卡片宽度
+                self._update_card_widths()
                 e.accept()
             elif self._drag_pos:
                 self.move(e.globalPos() - self._drag_pos)
@@ -930,6 +1034,9 @@ class MainWindow(QWidget):
         else:
             self.showMaximized()
             self.max_btn.setIcon(create_svg_icon("win_restore.svg", "#aaa"))
+        
+        # 窗口状态改变后，重新调整卡片宽度以适应新尺寸
+        QTimer.singleShot(100, self._update_card_widths)
 
     def _add_search_to_history(self):
         search_text = self.search.text().strip()
@@ -971,6 +1078,8 @@ class MainWindow(QWidget):
         QTimer.singleShot(10, self._load_data)
         QTimer.singleShot(10, self._update_ui_state)
         QTimer.singleShot(10, self._refresh_metadata_panel)
+        # 重构筛选器
+        QTimer.singleShot(10, self._rebuild_filter_panel)
 
     # === 新增：响应筛选器变化 ===
     def _on_filter_criteria_changed(self):
@@ -979,13 +1088,7 @@ class MainWindow(QWidget):
         self._load_data()
 
     def _load_data(self):
-        # 1. 刷新筛选器统计数据 (保证数字实时更新)
-        # 注意：这里我们获取全局统计，或者你可以根据当前 Sidebar 的分类做上下文统计（更复杂）
-        # 目前简单起见，显示全局活跃数据的统计
-        stats = self.db.get_filter_stats()
-        self.filter_panel.update_stats(stats)
-
-        # 2. 获取筛选条件
+        # 1. 获取筛选条件
         criteria = self.filter_panel.get_checked_criteria()
 
         while self.list_layout.count():
@@ -994,7 +1097,7 @@ class MainWindow(QWidget):
         self.cards = {}
         self.card_ordered_ids = []
         
-        # 3. 传递 filter_criteria 到 DB
+        # 2. 传递 filter_criteria 到 DB
         # 【核心补充】此处必须先计算总数，否则分页控件全是 1/1
         total_items = self.db.get_ideas_count(
             self.search.text(), 
@@ -1032,6 +1135,9 @@ class MainWindow(QWidget):
             
         self._update_pagination_ui() # 刷新页码显示
         self._update_ui_state()
+        
+        # 确保卡片宽度适应当前布局
+        QTimer.singleShot(0, self._update_card_widths)
 
     def _show_card_menu(self, idea_id, pos):
         if idea_id not in self.selected_ids:
@@ -1400,13 +1506,17 @@ class MainWindow(QWidget):
         self.show()
         self.activateWindow()
 
-    def quit_app(self):
-        BackupService.run_backup()
-        QApplication.quit()
-
+    def closeEvent(self, event):
+        self._save_window_state()
+        self.closing.emit()
+        self.hide()
+        event.ignore()
     def _save_window_state(self):
         save_setting("main_window_geometry_hex", self.saveGeometry().toHex().data().decode())
         save_setting("main_window_maximized", self.isMaximized())
+        # 记录当前侧边栏宽度，确保用户调整在下次启动时保留
+        if hasattr(self, "sidebar"):
+            save_setting("sidebar_width", self.sidebar.width())
 
     def save_state(self):
         self._save_window_state()
@@ -1417,9 +1527,9 @@ class MainWindow(QWidget):
             try:
                 self.restoreGeometry(QByteArray.fromHex(geo_hex.encode()))
             except Exception:
-                self.resize(1300, 700)
+                self.resize(1000, 500)
         else:
-            self.resize(1300, 700)
+            self.resize(1000, 500)
             
         if load_setting("main_window_maximized", False):
             self.showMaximized()
@@ -1427,8 +1537,75 @@ class MainWindow(QWidget):
         else:
             self.max_btn.setIcon(create_svg_icon("win_max.svg", "#aaa"))
 
-    def closeEvent(self, event):
-        self._save_window_state()
-        self.closing.emit()
-        self.hide()
-        event.ignore()
+        # 恢复侧边栏宽度
+        sidebar_width = load_setting("sidebar_width")
+        if sidebar_width is not None and hasattr(self, "main_splitter"):
+            if self.main_splitter.size().width() <= 0:
+                QTimer.singleShot(0, lambda w=sidebar_width: self._apply_sidebar_width(w))
+            else:
+                self._apply_sidebar_width(sidebar_width)
+        
+        # 确保在窗口状态恢复后调整卡片宽度
+        QTimer.singleShot(100, self._update_card_widths)
+
+    def _apply_sidebar_width(self, sidebar_width):
+        if not hasattr(self, "main_splitter"):
+            return
+        total = self.main_splitter.size().width()
+        if total <= 0:
+            return
+        try:
+            sidebar_width = int(sidebar_width)
+        except Exception:
+            return
+        sidebar_width = max(60, min(sidebar_width, total - 100))
+        self.main_splitter.setSizes([sidebar_width, total - sidebar_width])
+
+    def _update_card_widths(self):
+        """更新所有卡片的宽度以适应当前布局"""
+        if hasattr(self, 'main_splitter'):
+            sizes = self.main_splitter.sizes()
+            if len(sizes) >= 2:
+                # 中间区域宽度
+                middle_width = sizes[1]
+                
+                # 根据窗口是否最大化调整边距
+                if self.isMaximized():
+                    # 窗口最大化时，减少边距以充分利用空间
+                    available_width = middle_width - 20  # 减少边距
+                    card_width_ratio = 0.97  # 更大比例利用空间
+                else:
+                    # 普通窗口状态下保持适当的边距
+                    available_width = middle_width - 40  # 正常边距
+                    card_width_ratio = 0.95  # 适中的比例
+                
+                for card in self.cards.values():
+                    # 计算卡片的最大宽度
+                    max_width = max(280, int(available_width * card_width_ratio))
+                    card.setMaximumWidth(max_width)
+                    
+                    # 同时设置最小宽度，防止卡片过窄
+                    card.setMinimumWidth(min(200, max_width))
+        
+        # 同时也确保卡片容器的布局能正确更新
+        if hasattr(self, 'list_layout'):
+            # 强制重新布局以适应新的窗口尺寸
+            self.list_layout.update()
+
+    def _on_splitter_moved(self, pos, index):
+        # 当分割条移动时，重新计算卡片最大宽度
+        if hasattr(self, 'main_splitter'):
+            sizes = self.main_splitter.sizes()
+            if len(sizes) >= 2:
+                # 中间区域宽度
+                middle_width = sizes[1]
+                # 考虑布局边距，为卡片设置合理的最大宽度
+                available_width = middle_width - 40  # 减去布局边距
+                for card in self.cards.values():
+                    # 设置为可用区域宽度的 95%，确保有适当的边距
+                    card.setMaximumWidth(max(300, int(available_width * 0.95)))
+                    
+        # 同时也确保卡片容器的布局能正确更新
+        if hasattr(self, 'list_layout'):
+            # 强制重新布局以适应新的窗口尺寸
+            self.list_layout.update()

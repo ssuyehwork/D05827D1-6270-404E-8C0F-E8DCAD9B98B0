@@ -118,6 +118,18 @@ class RichTextEdit(QTextEdit):
         super().__init__(parent)
         self.image_data = None
         self.current_resizer = None
+        
+        # 添加滚动条样式
+        self.setStyleSheet("""
+            QTextEdit {
+                border: none;
+            }
+            QScrollBar:vertical { border: none; background: transparent; width: 6px; margin: 0px; }
+            QScrollBar::handle:vertical { background: #444; border-radius: 3px; min-height: 20px; }
+            QScrollBar::handle:vertical:hover { background: #555; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+        """)
 
     def mousePressEvent(self, event):
         # 检测点击图片

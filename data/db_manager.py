@@ -320,9 +320,10 @@ class DatabaseManager:
         return c.fetchone()
 
     # === 核心修改：get_filter_stats 支持上下文 ===
-    def get_filter_stats(self, f_type='all', f_val=None):
+    def get_filter_stats(self, search_text='', filter_type='all', filter_value=None):
         """
         获取当前视图范围内的各项统计，用于填充筛选器
+        支持根据搜索文本和过滤类型进行上下文相关统计
         """
         c = self.conn.cursor()
         stats = {
@@ -333,30 +334,32 @@ class DatabaseManager:
             'date_create': {}
         }
         
-        # 1. 构建基础 WHERE 子句 (与 get_ideas 保持一致)
-        # 注意：这里我们使用别名 i, idea_tags 别名 it, tags 别名 t
-        # 为了兼容性，我们构造一个通用 WHERE 字符串
-        
+        # 1. 构建基础 WHERE 子句
         where_clauses = ["1=1"]
         params = []
         
-        if f_type == 'trash':
+        if filter_type == 'trash':
             where_clauses.append("i.is_deleted=1")
         else:
             where_clauses.append("(i.is_deleted=0 OR i.is_deleted IS NULL)")
             
-        if f_type == 'category':
-            if f_val is None:
+        if filter_type == 'category':
+            if filter_value is None:
                 where_clauses.append("i.category_id IS NULL")
             else:
                 where_clauses.append("i.category_id=?")
-                params.append(f_val)
-        elif f_type == 'today':
+                params.append(filter_value)
+        elif filter_type == 'today':
             where_clauses.append("date(i.updated_at,'localtime')=date('now','localtime')")
-        elif f_type == 'untagged':
+        elif filter_type == 'untagged':
             where_clauses.append("i.id NOT IN (SELECT idea_id FROM idea_tags)")
-        elif f_type == 'bookmark':
+        elif filter_type == 'bookmark':
             where_clauses.append("i.is_favorite=1")
+        
+        # 添加搜索文本过滤
+        if search_text:
+            where_clauses.append("(i.title LIKE ? OR i.content LIKE ?)")
+            params.extend([f'%{search_text}%', f'%{search_text}%'])
             
         where_str = " AND ".join(where_clauses)
         
@@ -375,7 +378,6 @@ class DatabaseManager:
         stats['types'] = dict(c.fetchall())
 
         # 2.4 标签统计 (需要关联)
-        # 注意：这里的查询需要关联 tags 表
         tag_sql = f"""
             SELECT t.name, COUNT(it.idea_id) as cnt
             FROM tags t

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 # ui/filter_panel.py
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, 
-                             QTreeWidgetItem, QPushButton, QLabel, QFrame, QApplication)
+                             QTreeWidgetItem, QPushButton, QLabel, QFrame, QApplication, QMenu, QGraphicsDropShadowEffect)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QMimeData, QPoint
-from PyQt5.QtGui import QDrag, QPixmap, QPainter, QCursor
+from PyQt5.QtGui import QDrag, QPixmap, QPainter, QCursor, QColor, QPen
 from core.config import COLORS
 from core.shared import get_color_icon
 from ui.utils import create_svg_icon
@@ -11,58 +11,85 @@ import logging
 
 log = logging.getLogger("FilterPanel")
 
-class FilterHeader(QWidget):
-    """筛选器自定义标题栏，支持拖拽"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(30)
-        self.setStyleSheet(f"background-color: {COLORS['bg_mid']}; border-radius: 4px;")
-        
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 0, 5, 0)
-        
-        self.icon = QLabel()
-        self.icon.setPixmap(create_svg_icon("select.svg", "#aaa").pixmap(14, 14))
-        layout.addWidget(self.icon)
-        
-        self.title = QLabel("高级筛选")
-        self.title.setStyleSheet("font-weight: bold; color: #ccc; font-size: 12px; border:none;")
-        layout.addWidget(self.title)
-        
-        layout.addStretch()
-        
-        self.btn_float = QPushButton()
-        self.btn_float.setIcon(create_svg_icon("win_restore.svg", "#888")) # 用 restore 图标表示浮动
-        self.btn_float.setFixedSize(20, 20)
-        self.btn_float.setToolTip("悬浮 / 拖拽移动")
-        self.btn_float.setCursor(Qt.PointingHandCursor)
-        self.btn_float.setStyleSheet("border:none; background:transparent;")
-        # 按钮点击事件由父级处理
-        layout.addWidget(self.btn_float)
-
 class FilterPanel(QWidget):
     filterChanged = pyqtSignal()
-    dockRequest = pyqtSignal() # 请求停靠回主窗口
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._is_floating = False
         self._drag_start_pos = None
+        self._resize_start_pos = None
+        self._resize_start_geometry = None
+        self._resize_edge = None  # 'right', 'bottom', 'corner'
+        self.resize_margin = 10  # 边缘检测区域宽度（增大到10像素更容易抓取）
         
-        # 自身样式
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(f"background-color: {COLORS['bg_mid']}; border-radius: 8px;")
+        # 启用鼠标跟踪以实时更新光标 - 但只在边缘区域
+        self.setMouseTracking(False)
+        
+        # 设置最小和默认尺寸
+        self.setMinimumSize(250, 350)
+        self.resize(280, 450)
+        
+        # 主容器
+        self.container = QWidget()
+        self.container.setObjectName("FilterPanelContainer")
+        self.container.setStyleSheet(f"""
+            #FilterPanelContainer {{
+                background-color: {COLORS['bg_dark']}; 
+                border: 1px solid {COLORS['bg_light']};
+                border-radius: 12px;
+            }}
+        """)
+        
+        # 外层布局（用于阴影）
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.addWidget(self.container)
+        
+        # 添加阴影效果
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        self.container.setGraphicsEffect(shadow)
 
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(4, 4, 4, 4)
-        self.layout.setSpacing(5)
+        # 内容布局
+        self.layout = QVBoxLayout(self.container)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setSpacing(8)
         
-        # 1. 标题栏 (用于拖拽)
-        self.header = FilterHeader(self)
-        self.header.btn_float.clicked.connect(self.toggle_floating)
+        # 标题栏（用于拖拽）
+        self.header = QWidget()
+        self.header.setFixedHeight(32)
+        self.header.setStyleSheet(f"background-color: {COLORS['bg_mid']}; border-radius: 6px;")
+        self.header.setCursor(Qt.SizeAllCursor)  # 移动光标
+        
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(10, 0, 10, 0)
+        
+        header_icon = QLabel()
+        header_icon.setPixmap(create_svg_icon("select.svg", COLORS['primary']).pixmap(16, 16))
+        header_layout.addWidget(header_icon)
+        
+        header_title = QLabel("🔍 高级筛选")
+        header_title.setStyleSheet(f"color: {COLORS['primary']}; font-size: 13px; font-weight: bold;")
+        header_layout.addWidget(header_title)
+        header_layout.addStretch()
+        
+        close_btn = QPushButton()
+        close_btn.setIcon(create_svg_icon('win_close.svg', '#888'))
+        close_btn.setFixedSize(24, 24)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; border: none; border-radius: 4px; }
+            QPushButton:hover { background-color: #e74c3c; }
+        """)
+        close_btn.clicked.connect(self.hide)
+        header_layout.addWidget(close_btn)
+        
         self.layout.addWidget(self.header)
         
-        # 2. 树形筛选器
+        # 树形筛选器
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(20)
@@ -74,40 +101,77 @@ class FilterPanel(QWidget):
         
         self.tree.setStyleSheet(f"""
             QTreeWidget {{
-                background-color: {COLORS['bg_mid']};
+                background-color: {COLORS['bg_dark']};
                 color: #ddd;
                 border: none;
-                font-size: 13px;
+                font-size: 12px;
             }}
             QTreeWidget::item {{
-                height: 26px;
+                height: 28px;
                 border-radius: 4px;
-                padding-right: 5px;
+                padding: 2px 5px;
             }}
             QTreeWidget::item:hover {{ background-color: #2a2d2e; }}
             QTreeWidget::item:selected {{ background-color: #37373d; color: white; }}
+            QTreeWidget::indicator {{
+                width: 14px;
+                height: 14px;
+            }}
+            QScrollBar:vertical {{ border: none; background: transparent; width: 6px; margin: 0px; }}
+            QScrollBar::handle:vertical {{ background: #444; border-radius: 3px; min-height: 20px; }}
+            QScrollBar::handle:vertical:hover {{ background: #555; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
         """)
         
         self.tree.itemChanged.connect(self._on_item_changed)
         self.tree.itemClicked.connect(self._on_item_clicked)
         self.layout.addWidget(self.tree)
         
-        # 3. 重置按钮
-        self.btn_reset = QPushButton("重置筛选")
+        # 底部区域：重置按钮 + 调整大小手柄
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(4)
+        
+        # 重置按钮（缩窄宽度）
+        self.btn_reset = QPushButton("🔄 重置")
         self.btn_reset.setCursor(Qt.PointingHandCursor)
+        self.btn_reset.setFixedWidth(80)
         self.btn_reset.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['bg_dark']};
+                background-color: {COLORS['bg_mid']};
                 border: 1px solid #444;
                 color: #888;
-                border-radius: 4px;
-                padding: 6px;
+                border-radius: 6px;
+                padding: 8px;
                 font-size: 12px;
             }}
             QPushButton:hover {{ color: #ddd; background-color: #333; }}
         """)
         self.btn_reset.clicked.connect(self.reset_filters)
-        self.layout.addWidget(self.btn_reset)
+        bottom_layout.addWidget(self.btn_reset)
+        
+        bottom_layout.addStretch()
+        
+        # 调整大小手柄
+        self.resize_handle = QLabel("◢")
+        self.resize_handle.setFixedSize(30, 30)
+        self.resize_handle.setAlignment(Qt.AlignCenter)
+        self.resize_handle.setCursor(Qt.SizeFDiagCursor)
+        self.resize_handle.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['bg_mid']};
+                border: 1px solid #444;
+                border-radius: 6px;
+                color: #666;
+                font-size: 20px;
+                font-weight: bold;
+            }}
+            QLabel:hover {{ background-color: #333; color: #999; }}
+        """)
+        bottom_layout.addWidget(self.resize_handle)
+        
+        self.layout.addLayout(bottom_layout)
 
         self._block_item_click = False
         self.roots = {}
@@ -149,6 +213,8 @@ class FilterPanel(QWidget):
         self.filterChanged.emit()
 
     def _on_item_clicked(self, item, column):
+        if not item:
+            return
         if item.parent() is None:
             item.setExpanded(not item.isExpanded())
         elif item.flags() & Qt.ItemIsUserCheckable:
@@ -241,70 +307,100 @@ class FilterPanel(QWidget):
                 root.child(i).setCheckState(0, Qt.Unchecked)
         self.tree.blockSignals(False)
         self.filterChanged.emit()
-
-    # --- 拖拽与悬浮逻辑 ---
-    def toggle_floating(self):
-        if self._is_floating:
-            # 变回停靠状态 -> 发射信号让主窗口接管
-            self.dockRequest.emit()
-            self._is_floating = False
-            self.header.btn_float.setIcon(create_svg_icon("win_restore.svg", "#888"))
-        else:
-            # 变成悬浮状态
-            self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-            self.show()
-            self._is_floating = True
-            self.header.btn_float.setIcon(create_svg_icon("win_min.svg", "#888")) # 用这个图标表示“收回”
-
+    
+    # --- 拖拽和调整大小逻辑 ---
+    def _get_resize_edge(self, pos):
+        """检测鼠标是否在边缘，返回边缘类型"""
+        rect = self.rect()
+        margin = self.resize_margin
+        
+        # 考虑到外层布局的边距(8px)
+        at_right = (rect.width() - pos.x()) <= margin
+        at_bottom = (rect.height() - pos.y()) <= margin
+        
+        if at_right and at_bottom:
+            return 'corner'
+        elif at_right:
+            return 'right'
+        elif at_bottom:
+            return 'bottom'
+        return None
+    
     def mousePressEvent(self, event):
-        # 仅在头部区域触发拖拽
         if event.button() == Qt.LeftButton:
-            if self.header.geometry().contains(event.pos()):
+            # 检测是否点击了调整大小手柄
+            handle_global_rect = self.resize_handle.rect()
+            handle_pos = self.resize_handle.mapTo(self, QPoint(0, 0))
+            handle_global_rect.translate(handle_pos)
+            if handle_global_rect.contains(event.pos()):
+                self._resize_edge = 'corner'
+                self._resize_start_pos = event.globalPos()
+                self._resize_start_geometry = self.geometry()
+                self.setCursor(Qt.SizeFDiagCursor)
+                event.accept()
+                return
+            
+            # 检测是否在边缘（用于调整大小）
+            edge = self._get_resize_edge(event.pos())
+            if edge:
+                self._resize_edge = edge
+                self._resize_start_pos = event.globalPos()
+                self._resize_start_geometry = self.geometry()
+                if edge == 'corner':
+                    self.setCursor(Qt.SizeFDiagCursor)
+                elif edge == 'right':
+                    self.setCursor(Qt.SizeHorCursor)
+                elif edge == 'bottom':
+                    self.setCursor(Qt.SizeVerCursor)
+                event.accept()
+                return
+            
+            # 在标题栏区域才能拖拽
+            header_global_rect = self.header.rect()
+            header_pos = self.header.mapTo(self, QPoint(0, 0))
+            header_global_rect.translate(header_pos)
+            if header_global_rect.contains(event.pos()):
                 self._drag_start_pos = event.pos()
-            # 如果是悬浮窗，点击任意位置（非树）也可以拖动窗口
-            elif self._is_floating:
-                self._drag_start_pos = event.globalPos() - self.frameGeometry().topLeft()
+                self.setCursor(Qt.SizeAllCursor)
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if not (event.buttons() & Qt.LeftButton) or self._drag_start_pos is None:
+        # 处理调整大小
+        if self._resize_edge and (event.buttons() & Qt.LeftButton):
+            delta = event.globalPos() - self._resize_start_pos
+            geo = self._resize_start_geometry
+            
+            new_width = geo.width()
+            new_height = geo.height()
+            
+            if self._resize_edge in ['right', 'corner']:
+                new_width = max(self.minimumWidth(), geo.width() + delta.x())
+            if self._resize_edge in ['bottom', 'corner']:
+                new_height = max(self.minimumHeight(), geo.height() + delta.y())
+            
+            self.resize(new_width, new_height)
+            event.accept()
             return
-
-        # 悬浮窗模式：直接移动窗口
-        if self._is_floating:
+        
+        # 处理拖拽移动
+        if self._drag_start_pos and (event.buttons() & Qt.LeftButton):
             self.move(event.globalPos() - self._drag_start_pos)
             event.accept()
             return
-
-        # 停靠模式：触发 Drag 操作，允许拖入其他区域
-        if (event.pos() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
-            return
-
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setData("application/x-filter-panel", b"filter-panel")
-        drag.setMimeData(mime)
         
-        # 拖拽时的缩略图
-        pixmap = self.grab()
-        drag.setPixmap(pixmap.scaledToWidth(200, Qt.SmoothTransformation))
-        drag.setHotSpot(event.pos())
-        
-        # 执行拖拽
-        # 如果是 MoveAction，说明被接受了（被主窗口 DropEvent 处理了）
-        action = drag.exec_(Qt.MoveAction)
-        
-        self._drag_start_pos = None
+        event.ignore()
 
     def mouseReleaseEvent(self, event):
         self._drag_start_pos = None
+        self._resize_edge = None
+        self._resize_start_pos = None
+        self._resize_start_geometry = None
+        self.setCursor(Qt.ArrowCursor)
+        
+        # 保存尺寸
+        from core.settings import save_setting
+        save_setting('filter_panel_size', {'width': self.width(), 'height': self.height()})
+        
         super().mouseReleaseEvent(event)
-    
-    def closeEvent(self, event):
-        # 如果是悬浮窗被关闭（比如按Alt+F4），视为请求停靠
-        if self._is_floating:
-            self.dockRequest.emit()
-            self._is_floating = False
-            event.ignore()
-        else:
-            super().closeEvent(event)

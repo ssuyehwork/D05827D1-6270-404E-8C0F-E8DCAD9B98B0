@@ -275,13 +275,14 @@ def main():
     socket = QLocalSocket()
     socket.connectToServer(SERVER_NAME)
     if socket.waitForConnected(500):
-        socket.write(b'SHOW')
+        # 发送结束信号给旧实例
+        socket.write(b'EXIT')
         socket.flush()
         socket.waitForBytesWritten(1000)
         socket.disconnectFromServer()
-        sys.exit(0)
-    else:
-        QLocalServer.removeServer(SERVER_NAME)
+        time.sleep(0.5)  # 等待旧实例退出
+    
+    QLocalServer.removeServer(SERVER_NAME)
 
     server = QLocalServer()
     if not server.listen(SERVER_NAME):

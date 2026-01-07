@@ -165,6 +165,11 @@ class AdvancedTagSelector(QWidget):
         scroll.setStyleSheet("""
             QScrollArea { border: none; background: transparent; }
             QWidget { background: transparent; }
+            QScrollBar:vertical { border: none; background: transparent; width: 6px; margin: 0px; }
+            QScrollBar::handle:vertical { background: #444; border-radius: 3px; min-height: 20px; }
+            QScrollBar::handle:vertical:hover { background: #555; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
         """)
         
         self.scroll_content = QWidget()
@@ -188,6 +193,7 @@ class AdvancedTagSelector(QWidget):
             LEFT JOIN ideas i ON it.idea_id = i.id AND i.is_deleted = 0
             GROUP BY t.id 
             ORDER BY last_used DESC, cnt DESC, t.name ASC
+            LIMIT 20
         ''')
         all_tags = c.fetchall()
         

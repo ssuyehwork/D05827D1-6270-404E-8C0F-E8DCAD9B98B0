@@ -193,6 +193,12 @@ QPushButton#ToolButton:checked, QPushButton#MaxButton:checked { background-color
 QPushButton#CloseButton:hover { background-color: #E81123; color: white; }
 QPushButton#PinButton:hover { background-color: #444; }
 QPushButton#PinButton:checked { background-color: #0078D4; color: white; border: 1px solid #005A9E; }
+
+QScrollBar:vertical { border: none; background: transparent; width: 6px; margin: 0px; }
+QScrollBar::handle:vertical { background: #444; border-radius: 3px; min-height: 20px; }
+QScrollBar::handle:vertical:hover { background: #555; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
 """
 
 class ClickableLineEdit(QLineEdit):
