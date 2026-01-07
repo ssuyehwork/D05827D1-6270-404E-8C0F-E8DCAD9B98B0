@@ -126,7 +126,6 @@ class DatabaseManager:
 
     def update_field(self, iid, field, value):
         c = self.conn.cursor()
-        # 注意：这里直接拼接字段名，确保调用时 field 是安全的内部字符串
         c.execute(f'UPDATE ideas SET {field} = ? WHERE id = ?', (value, iid))
         self.conn.commit()
 
@@ -254,11 +253,9 @@ class DatabaseManager:
         c.execute('UPDATE ideas SET is_favorite=? WHERE id=?', (1 if state else 0, iid))
         
         if state:
-            # When bookmarking, set the color to the bookmark color.
             bookmark_color = '#ff6b81'
             c.execute('UPDATE ideas SET color=? WHERE id=?', (bookmark_color, iid))
         else:
-            # When un-bookmarking, revert the color based on its category.
             c.execute('SELECT category_id FROM ideas WHERE id=?', (iid,))
             res = c.fetchone()
             if res and res[0] is not None:
@@ -268,7 +265,6 @@ class DatabaseManager:
                 if cat_res:
                     c.execute('UPDATE ideas SET color=? WHERE id=?', (cat_res[0], iid))
             else:
-                # If no category, revert to the default uncategorized color.
                 uncat_color = COLORS.get('uncategorized', '#0A362F')
                 c.execute('UPDATE ideas SET color=? WHERE id=?', (uncat_color, iid))
 
@@ -308,9 +304,6 @@ class DatabaseManager:
     def get_idea(self, iid, include_blob=False):
         c = self.conn.cursor()
         if include_blob:
-            # Making SELECT * explicit to guarantee column order for consumers.
-            # 0:id, 1:title, 2:content, 3:color, 4:pinned, 5:fav, 6:created, 7:updated,
-            # 8:cat_id, 9:is_deleted, 10:item_type, 11:data_blob, 12:hash, 13:is_locked, 14:rating
             c.execute('''
                 SELECT id, title, content, color, is_pinned, is_favorite, 
                        created_at, updated_at, category_id, is_deleted, item_type, 
@@ -318,9 +311,6 @@ class DatabaseManager:
                 FROM ideas WHERE id=?
             ''', (iid,))
         else:
-            # 明确指定列，与 get_ideas 保持一致 (无blob)
-            # 0:id, 1:title, 2:content, 3:color, 4:pinned, 5:fav, 6:created, 7:updated, 
-            # 8:cat_id, 9:is_deleted, 10:item_type, 11:data_blob(NULL), 12:hash(NULL), 13:is_locked, 14:rating
             c.execute('''
                 SELECT id, title, content, color, is_pinned, is_favorite, 
                        created_at, updated_at, category_id, is_deleted, item_type, 
@@ -329,10 +319,10 @@ class DatabaseManager:
             ''', (iid,))
         return c.fetchone()
 
-    # === 新增：获取筛选器统计数据 ===
-    def get_filter_stats(self):
+    # === 核心修改：get_filter_stats 支持上下文 ===
+    def get_filter_stats(self, f_type='all', f_val=None):
         """
-        获取当前活跃数据（未删除）的各项统计，用于填充筛选器
+        获取当前视图范围内的各项统计，用于填充筛选器
         """
         c = self.conn.cursor()
         stats = {
@@ -343,53 +333,81 @@ class DatabaseManager:
             'date_create': {}
         }
         
-        base_condition = "WHERE is_deleted = 0"
-
-        # 1. 星级统计
-        c.execute(f"SELECT rating, COUNT(*) FROM ideas {base_condition} GROUP BY rating")
+        # 1. 构建基础 WHERE 子句 (与 get_ideas 保持一致)
+        # 注意：这里我们使用别名 i, idea_tags 别名 it, tags 别名 t
+        # 为了兼容性，我们构造一个通用 WHERE 字符串
+        
+        where_clauses = ["1=1"]
+        params = []
+        
+        if f_type == 'trash':
+            where_clauses.append("i.is_deleted=1")
+        else:
+            where_clauses.append("(i.is_deleted=0 OR i.is_deleted IS NULL)")
+            
+        if f_type == 'category':
+            if f_val is None:
+                where_clauses.append("i.category_id IS NULL")
+            else:
+                where_clauses.append("i.category_id=?")
+                params.append(f_val)
+        elif f_type == 'today':
+            where_clauses.append("date(i.updated_at,'localtime')=date('now','localtime')")
+        elif f_type == 'untagged':
+            where_clauses.append("i.id NOT IN (SELECT idea_id FROM idea_tags)")
+        elif f_type == 'bookmark':
+            where_clauses.append("i.is_favorite=1")
+            
+        where_str = " AND ".join(where_clauses)
+        
+        # 2. 执行统计查询
+        
+        # 2.1 星级统计
+        c.execute(f"SELECT i.rating, COUNT(*) FROM ideas i WHERE {where_str} GROUP BY i.rating", params)
         stats['stars'] = dict(c.fetchall())
 
-        # 2. 颜色统计
-        c.execute(f"SELECT color, COUNT(*) FROM ideas {base_condition} GROUP BY color")
+        # 2.2 颜色统计
+        c.execute(f"SELECT i.color, COUNT(*) FROM ideas i WHERE {where_str} GROUP BY i.color", params)
         stats['colors'] = dict(c.fetchall())
 
-        # 3. 类型统计
-        c.execute(f"SELECT item_type, COUNT(*) FROM ideas {base_condition} GROUP BY item_type")
+        # 2.3 类型统计
+        c.execute(f"SELECT i.item_type, COUNT(*) FROM ideas i WHERE {where_str} GROUP BY i.item_type", params)
         stats['types'] = dict(c.fetchall())
 
-        # 4. 标签统计 (关联查询)
-        c.execute(f"""
+        # 2.4 标签统计 (需要关联)
+        # 注意：这里的查询需要关联 tags 表
+        tag_sql = f"""
             SELECT t.name, COUNT(it.idea_id) as cnt
             FROM tags t
             JOIN idea_tags it ON t.id = it.tag_id
             JOIN ideas i ON it.idea_id = i.id
-            {base_condition}
+            WHERE {where_str}
             GROUP BY t.id
             ORDER BY cnt DESC
-        """)
-        stats['tags'] = c.fetchall() # List of (name, count)
+        """
+        c.execute(tag_sql, params)
+        stats['tags'] = c.fetchall()
 
-        # 5. 日期统计 (SQLite 日期函数)
-        # 今日
-        c.execute(f"SELECT COUNT(*) FROM ideas {base_condition} AND date(created_at, 'localtime') = date('now', 'localtime')")
+        # 2.5 日期统计 (创建时间)
+        base_date_sql = f"SELECT COUNT(*) FROM ideas i WHERE {where_str} AND "
+        
+        c.execute(base_date_sql + "date(i.created_at, 'localtime') = date('now', 'localtime')", params)
         stats['date_create']['today'] = c.fetchone()[0]
-        # 昨日
-        c.execute(f"SELECT COUNT(*) FROM ideas {base_condition} AND date(created_at, 'localtime') = date('now', '-1 day', 'localtime')")
+        
+        c.execute(base_date_sql + "date(i.created_at, 'localtime') = date('now', '-1 day', 'localtime')", params)
         stats['date_create']['yesterday'] = c.fetchone()[0]
-        # 本周 (近7天)
-        c.execute(f"SELECT COUNT(*) FROM ideas {base_condition} AND date(created_at, 'localtime') >= date('now', '-6 days', 'localtime')")
+        
+        c.execute(base_date_sql + "date(i.created_at, 'localtime') >= date('now', '-6 days', 'localtime')", params)
         stats['date_create']['week'] = c.fetchone()[0]
-        # 本月 (当月)
-        c.execute(f"SELECT COUNT(*) FROM ideas {base_condition} AND strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime')")
+        
+        c.execute(base_date_sql + "strftime('%Y-%m', i.created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime')", params)
         stats['date_create']['month'] = c.fetchone()[0]
 
         return stats
 
-    # === 修改：get_ideas 支持高级筛选 ===
     def get_ideas(self, search, f_type, f_val, page=None, page_size=20, tag_filter=None, filter_criteria=None):
         c = self.conn.cursor()
         
-        # 基础字段
         q = """
             SELECT DISTINCT 
                 i.id, i.title, i.content, i.color, i.is_pinned, i.is_favorite, 
@@ -402,7 +420,6 @@ class DatabaseManager:
         """
         p = []
         
-        # 1. 基础侧边栏过滤 (Trash/Category/etc)
         if f_type == 'trash': q += ' AND i.is_deleted=1'
         else: q += ' AND (i.is_deleted=0 OR i.is_deleted IS NULL)'
         
@@ -413,47 +430,39 @@ class DatabaseManager:
         elif f_type == 'untagged': q += ' AND i.id NOT IN (SELECT idea_id FROM idea_tags)'
         elif f_type == 'bookmark': q += ' AND i.is_favorite=1'
         
-        # 2. 搜索框
         if search:
             q += ' AND (i.title LIKE ? OR i.content LIKE ? OR t.name LIKE ?)'
             p.extend([f'%{search}%']*3)
 
-        # 3. 单标签过滤 (兼容旧逻辑)
         if tag_filter:
             q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = ?))"
             p.append(tag_filter)
 
-        # 4. === 高级筛选器逻辑 (FilterPanel) ===
         if filter_criteria:
-            # 4.1 星级筛选 (多选 OR)
             if 'stars' in filter_criteria:
                 stars = filter_criteria['stars']
                 placeholders = ','.join('?' * len(stars))
                 q += f" AND i.rating IN ({placeholders})"
                 p.extend(stars)
             
-            # 4.2 颜色筛选 (多选 OR)
             if 'colors' in filter_criteria:
                 colors = filter_criteria['colors']
                 placeholders = ','.join('?' * len(colors))
                 q += f" AND i.color IN ({placeholders})"
                 p.extend(colors)
 
-            # 4.3 类型筛选 (多选 OR)
             if 'types' in filter_criteria:
                 types = filter_criteria['types']
                 placeholders = ','.join('?' * len(types))
                 q += f" AND i.item_type IN ({placeholders})"
                 p.extend(types)
 
-            # 4.4 标签云筛选 (多选 OR - 包含任意一个选中的标签)
             if 'tags' in filter_criteria:
                 tags = filter_criteria['tags']
                 tag_placeholders = ','.join('?' * len(tags))
                 q += f" AND i.id IN (SELECT idea_id FROM idea_tags JOIN tags ON idea_tags.tag_id = tags.id WHERE tags.name IN ({tag_placeholders}))"
                 p.extend(tags)
 
-            # 4.5 日期筛选 (多选 OR - 满足任意一个时间段)
             if 'date_create' in filter_criteria:
                 date_conditions = []
                 for d_opt in filter_criteria['date_create']:
@@ -469,7 +478,6 @@ class DatabaseManager:
                 if date_conditions:
                     q += " AND (" + " OR ".join(date_conditions) + ")"
 
-        # 排序与分页
         if f_type == 'trash':
             q += ' ORDER BY i.updated_at DESC'
         else:
@@ -484,7 +492,6 @@ class DatabaseManager:
         c.execute(q, p)
         return c.fetchall()
 
-    # === 修改：get_ideas_count 同样支持 filter_criteria ===
     def get_ideas_count(self, search, f_type, f_val, tag_filter=None, filter_criteria=None):
         c = self.conn.cursor()
         q = "SELECT COUNT(DISTINCT i.id) FROM ideas i LEFT JOIN idea_tags it ON i.id=it.idea_id LEFT JOIN tags t ON it.tag_id=t.id WHERE 1=1"
@@ -508,7 +515,6 @@ class DatabaseManager:
             q += " AND i.id IN (SELECT idea_id FROM idea_tags WHERE tag_id = (SELECT id FROM tags WHERE name = ?))"
             p.append(tag_filter)
 
-        # Advanced Filters
         if filter_criteria:
             if 'stars' in filter_criteria:
                 stars = filter_criteria['stars']
@@ -588,7 +594,6 @@ class DatabaseManager:
     def set_category_color(self, cat_id, color):
         c = self.conn.cursor()
         try:
-            # Step 1: Find all relevant category IDs (the given one + all descendants)
             find_ids_query = """
                 WITH RECURSIVE category_tree(id) AS (
                     SELECT ?
@@ -603,22 +608,17 @@ class DatabaseManager:
             if not all_ids:
                 return
 
-            # Step 2: Create placeholders for the UPDATE queries
             placeholders = ','.join('?' * len(all_ids))
 
-            # Step 3: Update all ideas in those categories
             update_ideas_query = f"UPDATE ideas SET color = ? WHERE category_id IN ({placeholders})"
             c.execute(update_ideas_query, (color, *all_ids))
 
-            # Step 4: Update all the categories themselves
             update_categories_query = f"UPDATE categories SET color = ? WHERE id IN ({placeholders})"
             c.execute(update_categories_query, (color, *all_ids))
 
             self.conn.commit()
         except Exception as e:
             self.conn.rollback()
-            # In a real app, you'd want to log this error.
-            print(f"Error during recursive category color update: {e}")
 
     def set_category_preset_tags(self, cat_id, tags_str):
         c = self.conn.cursor()

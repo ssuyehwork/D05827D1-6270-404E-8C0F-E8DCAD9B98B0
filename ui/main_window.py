@@ -102,21 +102,18 @@ class ContentContainer(QWidget):
     cleared = pyqtSignal()
 
     def mousePressEvent(self, e):
-        # 点击空白处（没有子控件的地方）触发清除选择
         if self.childAt(e.pos()) is None:
             self.cleared.emit()
-            e.accept() # 阻止事件冒泡，防止被父窗口再次处理
+            e.accept()
         else:
             super().mousePressEvent(e)
 
-# 可双击的输入框
 class ClickableLineEdit(QLineEdit):
     doubleClicked = pyqtSignal()
     def mouseDoubleClickEvent(self, event):
         self.doubleClicked.emit()
         super().mouseDoubleClickEvent(event)
 
-# --- 辅助类：带删除按钮的标签 ---
 class TagChipWidget(QWidget):
     deleted = pyqtSignal(str)
 
@@ -131,32 +128,22 @@ class TagChipWidget(QWidget):
         layout.setSpacing(6)
 
         self.label = QLabel(tag_name)
-        self.label.setStyleSheet("border: none; background: transparent; color: #DDD; font-size: 12px; font-family: 'Segoe UI', 'Microsoft YaHei';")
+        self.label.setStyleSheet("border: none; background: transparent; color: #DDD; font-size: 12px;")
         
         self.delete_btn = QPushButton()
         self.delete_btn.setIcon(create_svg_icon("win_close.svg", "#AAA"))
         self.delete_btn.setFixedSize(16, 16)
         self.delete_btn.setCursor(Qt.PointingHandCursor)
         self.delete_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: none;
-                border-radius: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['danger']};
-            }}
+            QPushButton {{ background-color: transparent; border: none; border-radius: 8px; }}
+            QPushButton:hover {{ background-color: {COLORS['danger']}; }}
         """)
         
         layout.addWidget(self.label)
         layout.addWidget(self.delete_btn)
 
         self.setStyleSheet("""
-            #TagChip {
-                background-color: #383838;
-                border: 1px solid #4D4D4D;
-                border-radius: 14px;
-            }
+            #TagChip { background-color: #383838; border: 1px solid #4D4D4D; border-radius: 14px; }
         """)
         
         self.delete_btn.clicked.connect(self._emit_delete)
@@ -164,12 +151,9 @@ class TagChipWidget(QWidget):
     def _emit_delete(self):
         self.deleted.emit(self.tag_name)
 
-
-# --- 辅助类：用于右侧栏的通用占位符 ---
 class InfoWidget(QWidget):
     def __init__(self, icon_name, title, subtitle, parent=None):
         super().__init__(parent)
-        # 【关键】强制背景透明
         self.setStyleSheet("background-color: transparent;")
         
         layout = QVBoxLayout(self)
@@ -195,21 +179,19 @@ class InfoWidget(QWidget):
 
         layout.addStretch(1)
 
-# --- 辅助类：元数据展示 (清透胶囊样式) ---
 class MetadataDisplay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 【关键】强制容器背景透明
         self.setStyleSheet("background-color: transparent;")
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 5, 0, 5)
-        self.layout.setSpacing(8) # 胶囊之间的间距
+        self.layout.setSpacing(8)
         self.layout.setAlignment(Qt.AlignTop)
 
     def _add_row(self, label, value):
         row = QWidget()
-        row.setObjectName("CapsuleRow") # 【关键】设置ID
+        row.setObjectName("CapsuleRow")
         row.setAttribute(Qt.WA_StyledBackground, True)
         
         row_layout = QHBoxLayout(row)
@@ -217,7 +199,6 @@ class MetadataDisplay(QWidget):
         row_layout.setSpacing(10)
         
         lbl = QLabel(label)
-        # 背景设置为 transparent
         lbl.setStyleSheet("font-size: 11px; color: #AAA; border: none; min-width: 45px; background: transparent;")
         row_layout.addWidget(lbl)
         
@@ -226,7 +207,6 @@ class MetadataDisplay(QWidget):
         val.setStyleSheet("font-size: 12px; color: #FFF; border: none; font-weight: bold; background: transparent;") 
         row_layout.addWidget(val)
         
-        # 【关键】只给 #CapsuleRow 设置半透明背景
         row.setStyleSheet(f"""
             QWidget {{ background-color: transparent; }}
             #CapsuleRow {{
@@ -239,11 +219,9 @@ class MetadataDisplay(QWidget):
         self.layout.addWidget(row)
 
     def update_data(self, data, tags, category_name):
-        # Clear old data
         while self.layout.count():
             child = self.layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+            if child.widget(): child.widget().deleteLater()
         
         if not data: return
 
@@ -251,18 +229,14 @@ class MetadataDisplay(QWidget):
         self._add_row("更新于", data['updated_at'][:16])
         self._add_row("分类", category_name if category_name else "未分类")
         
-        # --- 状态行 ---
         states = []
         if data['is_pinned']: states.append("置顶")
         if data['is_locked']: states.append("锁定")
         if data['is_favorite']: states.append("书签")
         self._add_row("状态", ", ".join(states) if states else "无")
 
-        # --- 星级 ---
         rating_str = '★' * data['rating'] + '☆' * (5 - data['rating'])
         self._add_row("星级", rating_str)
-        
-        # --- 标签 ---
         self._add_row("标签", ", ".join(tags) if tags else "无")
 
 
@@ -286,12 +260,11 @@ class MainWindow(QWidget):
         self._resize_start_pos = None
         self._resize_start_geometry = None
         
-        # 分页状态
         self.current_page = 1
         self.page_size = 100
         self.total_pages = 1
         
-        self.open_dialogs = [] # 存储打开的窗口
+        self.open_dialogs = []
         
         self.setWindowFlags(
             Qt.FramelessWindowHint | 
@@ -302,9 +275,12 @@ class MainWindow(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
+        # 【关键】开启拖拽接收
+        self.setAcceptDrops(True)
         
         self._setup_ui()
         self._load_data()
+
     def _setup_ui(self):
         self.setWindowTitle('数据管理')
         
@@ -327,7 +303,6 @@ class MainWindow(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
         
-        # 【重要修复】先创建 Titlebar (包含 max_btn)，再调用 _restore_window_state
         titlebar = self._create_titlebar()
         outer_layout.addWidget(titlebar)
         
@@ -335,33 +310,33 @@ class MainWindow(QWidget):
         main_layout = QHBoxLayout(main_content)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # === 左侧拆分为 Sidebar(上) 和 FilterPanel(下) ===
+        # 1. 默认左侧布局：垂直 Splitter (上Sidebar, 下FilterPanel)
         self.left_splitter = QSplitter(Qt.Vertical)
         self.left_splitter.setHandleWidth(2)
         
-        # 1. 上半部分：文件夹导航
         self.sidebar = Sidebar(self.db)
         self.sidebar.filter_changed.connect(self._set_filter)
         self.sidebar.data_changed.connect(self._load_data)
         self.sidebar.new_data_requested.connect(self._on_new_data_in_category_requested)
         self.left_splitter.addWidget(self.sidebar)
         
-        # 2. 下半部分：筛选器
         self.filter_panel = FilterPanel()
         self.filter_panel.filterChanged.connect(self._on_filter_criteria_changed)
+        self.filter_panel.dockRequest.connect(self._on_filter_panel_dock_request) # 处理停靠请求
         self.left_splitter.addWidget(self.filter_panel)
         
-        # 设置左侧分割比例 (7:3)
         self.left_splitter.setStretchFactor(0, 7)
         self.left_splitter.setStretchFactor(1, 3)
         
-        # 主分割器
-        self.main_splitter = QSplitter(Qt.Horizontal) # 原来的 splitter 改名以免混淆
-        self.main_splitter.addWidget(self.left_splitter) # 左侧加入
+        # 2. 主横向 Splitter
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.addWidget(self.left_splitter)
         
+        # 3. 中间列表区
         middle_panel = self._create_middle_panel()
         self.main_splitter.addWidget(middle_panel)
         
+        # 4. 右侧元数据区
         self.metadata_panel = self._create_metadata_panel()
         self.main_splitter.addWidget(self.metadata_panel)
         
@@ -381,11 +356,8 @@ class MainWindow(QWidget):
         QShortcut(QKeySequence("Ctrl+B"), self, self._do_edit)
         QShortcut(QKeySequence("Ctrl+P"), self, self._do_pin)
         QShortcut(QKeySequence("Delete"), self, self._handle_del_key)
-        
-        # 【新增】Ctrl+S 锁定/解锁快捷键
         QShortcut(QKeySequence("Ctrl+S"), self, self._do_lock)
 
-        # 【新增】星级评分快捷键 Ctrl+0 到 Ctrl+5
         for i in range(6):
             QShortcut(QKeySequence(f"Ctrl+{i}"), self, lambda r=i: self._do_set_rating(r))
         
@@ -393,8 +365,53 @@ class MainWindow(QWidget):
         self.space_shortcut.setContext(Qt.WindowShortcut)
         self.space_shortcut.activated.connect(lambda: self.preview_service.toggle_preview(self.selected_ids))
 
-        # 【核心修复】最后恢复窗口状态，确保 max_btn 已经创建
         self._restore_window_state()
+
+    # --- 拖拽停靠逻辑 ---
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-filter-panel"):
+            event.accept()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat("application/x-filter-panel"):
+            # 获取放置位置的相对坐标
+            pos = event.pos()
+            # 简单判断区域：
+            # 如果在窗口左侧 1/4 区域 -> 放入左侧 Splitter
+            # 如果在窗口右侧 1/4 区域 -> 放入右侧 Metadata 区域 (需要 Metadata 支持布局插入)
+            # 否则 -> 放入中间 (作为 MainSplitter 的一列)
+            
+            w = self.width()
+            
+            # 必须先从当前父级移除，确保干净的 reparent
+            self.filter_panel.setParent(None) 
+            self.filter_panel.setWindowFlags(Qt.Widget) # 恢复为普通控件
+            
+            if pos.x() < w * 0.25:
+                # 放入左侧 Splitter (默认位置)
+                self.left_splitter.addWidget(self.filter_panel)
+            elif pos.x() > w * 0.75:
+                # 放入右侧，由于 metadata_panel 是 QWidget with VBox，我们加到它的 VBox 里
+                # 或者加到 MainSplitter 的最右侧
+                # 这里为了简单，加到 MainSplitter 最右侧
+                self.main_splitter.addWidget(self.filter_panel)
+            else:
+                # 放入中间 (Sidebar 和 List 之间)
+                self.main_splitter.insertWidget(1, self.filter_panel)
+            
+            self.filter_panel.show()
+            event.accept()
+        else:
+            super().dropEvent(event)
+
+    def _on_filter_panel_dock_request(self):
+        # 默认恢复到左侧 Splitter 底部
+        self.filter_panel.setParent(None)
+        self.filter_panel.setWindowFlags(Qt.Widget)
+        self.left_splitter.addWidget(self.filter_panel)
+        self.filter_panel.show()
 
     def _select_all(self):
         if not self.cards: return
@@ -440,7 +457,7 @@ class MainWindow(QWidget):
         
         layout.addSpacing(10)
         
-        # --- 分页控件区域 (使用 SVG) ---
+        # --- 分页控件 (使用 SVG) ---
         page_btn_style = """
             QPushButton { background-color: transparent; border: 1px solid #444; border-radius: 4px; padding: 2px 8px; min-width: 24px; min-height: 20px; }
             QPushButton:hover { background-color: #333; border-color: #666; }
