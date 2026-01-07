@@ -20,6 +20,7 @@ from ui.advanced_tag_selector import AdvancedTagSelector
 from ui.components.search_line_edit import SearchLineEdit
 from services.preview_service import PreviewService
 from ui.utils import create_svg_icon
+from ui.filter_panel import FilterPanel 
 
 # --- 辅助类：流式布局 ---
 class FlowLayout(QLayout):
@@ -306,8 +307,6 @@ class MainWindow(QWidget):
         self._load_data()
     def _setup_ui(self):
         self.setWindowTitle('数据管理')
-        # self.resize(1300, 700) # Replaced by restore
-        self._restore_window_state()
         
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(12, 12, 12, 12)
@@ -328,31 +327,49 @@ class MainWindow(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
         
+        # 【重要修复】先创建 Titlebar (包含 max_btn)，再调用 _restore_window_state
         titlebar = self._create_titlebar()
         outer_layout.addWidget(titlebar)
         
         main_content = QWidget()
         main_layout = QHBoxLayout(main_content)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        splitter = QSplitter(Qt.Horizontal)
         
+        # === 左侧拆分为 Sidebar(上) 和 FilterPanel(下) ===
+        self.left_splitter = QSplitter(Qt.Vertical)
+        self.left_splitter.setHandleWidth(2)
+        
+        # 1. 上半部分：文件夹导航
         self.sidebar = Sidebar(self.db)
         self.sidebar.filter_changed.connect(self._set_filter)
         self.sidebar.data_changed.connect(self._load_data)
         self.sidebar.new_data_requested.connect(self._on_new_data_in_category_requested)
-        splitter.addWidget(self.sidebar)
+        self.left_splitter.addWidget(self.sidebar)
+        
+        # 2. 下半部分：筛选器
+        self.filter_panel = FilterPanel()
+        self.filter_panel.filterChanged.connect(self._on_filter_criteria_changed)
+        self.left_splitter.addWidget(self.filter_panel)
+        
+        # 设置左侧分割比例 (7:3)
+        self.left_splitter.setStretchFactor(0, 7)
+        self.left_splitter.setStretchFactor(1, 3)
+        
+        # 主分割器
+        self.main_splitter = QSplitter(Qt.Horizontal) # 原来的 splitter 改名以免混淆
+        self.main_splitter.addWidget(self.left_splitter) # 左侧加入
         
         middle_panel = self._create_middle_panel()
-        splitter.addWidget(middle_panel)
+        self.main_splitter.addWidget(middle_panel)
         
         self.metadata_panel = self._create_metadata_panel()
-        splitter.addWidget(self.metadata_panel)
+        self.main_splitter.addWidget(self.metadata_panel)
         
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 4)
-        splitter.setStretchFactor(2, 1)
+        self.main_splitter.setStretchFactor(0, 1) # Left
+        self.main_splitter.setStretchFactor(1, 4) # Middle
+        self.main_splitter.setStretchFactor(2, 1) # Right
         
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.main_splitter)
         outer_layout.addWidget(main_content)
         
         QShortcut(QKeySequence("Ctrl+T"), self, self._handle_extract_key)
@@ -375,6 +392,9 @@ class MainWindow(QWidget):
         self.space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
         self.space_shortcut.setContext(Qt.WindowShortcut)
         self.space_shortcut.activated.connect(lambda: self.preview_service.toggle_preview(self.selected_ids))
+
+        # 【核心修复】最后恢复窗口状态，确保 max_btn 已经创建
+        self._restore_window_state()
 
     def _select_all(self):
         if not self.cards: return
@@ -935,22 +955,50 @@ class MainWindow(QWidget):
         QTimer.singleShot(10, self._update_ui_state)
         QTimer.singleShot(10, self._refresh_metadata_panel)
 
+    # === 新增：响应筛选器变化 ===
+    def _on_filter_criteria_changed(self):
+        # 筛选条件改变 -> 重置页码 -> 重新加载数据
+        self.current_page = 1 
+        self._load_data()
+
     def _load_data(self):
+        # 1. 刷新筛选器统计数据 (保证数字实时更新)
+        # 注意：这里我们获取全局统计，或者你可以根据当前 Sidebar 的分类做上下文统计（更复杂）
+        # 目前简单起见，显示全局活跃数据的统计
+        stats = self.db.get_filter_stats()
+        self.filter_panel.update_stats(stats)
+
+        # 2. 获取筛选条件
+        criteria = self.filter_panel.get_checked_criteria()
+
         while self.list_layout.count():
             w = self.list_layout.takeAt(0).widget()
             if w: w.deleteLater()
         self.cards = {}
         self.card_ordered_ids = []
         
+        # 3. 传递 filter_criteria 到 DB
         # 【核心补充】此处必须先计算总数，否则分页控件全是 1/1
-        total_items = self.db.get_ideas_count(self.search.text(), *self.curr_filter, tag_filter=self.current_tag_filter)
+        total_items = self.db.get_ideas_count(
+            self.search.text(), 
+            *self.curr_filter, 
+            tag_filter=self.current_tag_filter,
+            filter_criteria=criteria # 传入条件
+        )
         self.total_pages = math.ceil(total_items / self.page_size) if total_items > 0 else 1
         
         # 修正页码范围
         if self.current_page > self.total_pages: self.current_page = self.total_pages
         if self.current_page < 1: self.current_page = 1
 
-        data_list = self.db.get_ideas(self.search.text(), *self.curr_filter, page=self.current_page, page_size=self.page_size, tag_filter=self.current_tag_filter)
+        data_list = self.db.get_ideas(
+            self.search.text(), 
+            *self.curr_filter, 
+            page=self.current_page, 
+            page_size=self.page_size, 
+            tag_filter=self.current_tag_filter,
+            filter_criteria=criteria # 传入条件
+        )
         
         if not data_list:
             self.list_layout.addWidget(QLabel("🔭 空空如也", alignment=Qt.AlignCenter, styleSheet="color:#666;font-size:16px;margin-top:50px"))
@@ -1358,7 +1406,9 @@ class MainWindow(QWidget):
             
         if load_setting("main_window_maximized", False):
             self.showMaximized()
-            self.max_btn.setText('❐')
+            self.max_btn.setIcon(create_svg_icon("win_restore.svg", "#aaa"))
+        else:
+            self.max_btn.setIcon(create_svg_icon("win_max.svg", "#aaa"))
 
     def closeEvent(self, event):
         self._save_window_state()
