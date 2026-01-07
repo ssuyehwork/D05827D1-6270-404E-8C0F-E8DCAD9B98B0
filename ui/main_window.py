@@ -966,8 +966,8 @@ class MainWindow(QWidget):
         self.clear_tag_btn.hide()
         titles = {'all':'全部数据','today':'今日数据','trash':'回收站','favorite':'我的收藏'}
         if f_type == 'category':
-            cat = next((c for c in self.db.get_categories() if c[0] == val), None)
-            self.header_label.setText(f"📂 {cat[1]}" if cat else '文件夹')
+            cat = next((c for c in self.db.get_categories() if c['id'] == val), None)
+            self.header_label.setText(f"📂 {cat['name']}" if cat else '文件夹')
         else:
             self.header_label.setText(titles.get(f_type, '灵感列表'))
         
@@ -1001,10 +1001,10 @@ class MainWindow(QWidget):
             c.selection_requested.connect(self._handle_selection_request)
             c.double_clicked.connect(self._extract_single)
             c.setContextMenuPolicy(Qt.CustomContextMenu)
-            c.customContextMenuRequested.connect(lambda pos, iid=d[0]: self._show_card_menu(iid, pos))
+            c.customContextMenuRequested.connect(lambda pos, iid=d['id']: self._show_card_menu(iid, pos))
             self.list_layout.addWidget(c)
-            self.cards[d[0]] = c
-            self.card_ordered_ids.append(d[0])
+            self.cards[d['id']] = c
+            self.card_ordered_ids.append(d['id'])
             
         self._update_pagination_ui() # 刷新页码显示
         self._update_ui_state()
@@ -1022,8 +1022,8 @@ class MainWindow(QWidget):
         
         in_trash = (self.curr_filter[0] == 'trash')
         
-        is_locked = data[13] if len(data) > 13 else 0
-        rating = data[14] if len(data) > 14 else 0
+        is_locked = data['is_locked']
+        rating = data['rating']
         
         if not in_trash:
             if not is_locked:
@@ -1057,15 +1057,15 @@ class MainWindow(QWidget):
                 menu.addAction('🔒 锁定 (Ctrl+S)', self._do_lock)
                 
             menu.addSeparator()
-            menu.addAction('📌 取消置顶' if data[4] else '📌 置顶', self._do_pin)
-            menu.addAction('🔖 取消书签' if data[5] else '🔖 添加书签', self._do_fav)
+            menu.addAction('📌 取消置顶' if data['is_pinned'] else '📌 置顶', self._do_pin)
+            menu.addAction('🔖 取消书签' if data['is_favorite'] else '🔖 添加书签', self._do_fav)
             menu.addSeparator()
             
             if not is_locked:
                 cat_menu = menu.addMenu('📂 移动到分类')
                 cat_menu.addAction('⚠️ 未分类', lambda: self._move_to_category(None))
                 for cat in self.db.get_categories():
-                    cat_menu.addAction(f'📂 {cat[1]}', lambda cid=cat[0]: self._move_to_category(cid))
+                    cat_menu.addAction(f'📂 {cat["name"]}', lambda cid=cat["id"]: self._move_to_category(cid))
                 menu.addSeparator()
                 menu.addAction('🗑️ 移至回收站', self._do_del)
             else:
@@ -1191,8 +1191,8 @@ class MainWindow(QWidget):
             idea_id = list(self.selected_ids)[0]
             d = self.db.get_idea(idea_id)
             if d:
-                self.btns['pin'].setText('📍' if not d[4] else '📌')
-                self.btns['fav'].setText('🔖' if d[5] else '🔖') # 保持图标一致
+                self.btns['pin'].setText('📍' if not d['is_pinned'] else '📌')
+                self.btns['fav'].setText('🔖' if d['is_favorite'] else '🔖') # 保持图标一致
         else:
             self.btns['pin'].setText('📌')
             self.btns['fav'].setText('🔖')
@@ -1249,7 +1249,7 @@ class MainWindow(QWidget):
             all_data = []
             for iid in self.selected_ids:
                 data = self.db.get_idea(iid)
-                if data and not data[5]: # data[5] is is_favorite
+                if data and not data['is_favorite']:
                     any_not_favorited = True
                 all_data.append(data)
 
@@ -1335,7 +1335,7 @@ class MainWindow(QWidget):
         if not data:
             self._show_tooltip('⚠️ 数据不存在', 1500)
             return
-        content_to_copy = data[2] if data[2] else ""
+        content_to_copy = data['content'] or ""
         QApplication.clipboard().setText(content_to_copy)
         preview = content_to_copy.replace('\n', ' ')[:40] + ('...' if len(content_to_copy) > 40 else '')
         self._show_tooltip(f'✅ 内容已提取到剪贴板\n\n📋 {preview}', 2500)
@@ -1348,13 +1348,13 @@ class MainWindow(QWidget):
             return
         lines = ['='*60, '💡 灵感闪记 - 内容导出', '='*60, '']
         for d in data:
-            lines.append(f"【{d[1]}】")
-            if d[4]: lines.append('📌 已置顶')
-            if d[5]: lines.append('⭐ 已收藏')
-            tags = self.db.get_tags(d[0])
+            lines.append(f"【{d['title']}】")
+            if d['is_pinned']: lines.append('📌 已置顶')
+            if d['is_favorite']: lines.append('⭐ 已收藏')
+            tags = self.db.get_tags(d['id'])
             if tags: lines.append(f"标签: {', '.join(tags)}")
-            lines.append(f"时间: {d[6]}")
-            if d[2]: lines.append(f"\n{d[2]}")
+            lines.append(f"时间: {d['created_at']}")
+            if d['content']: lines.append(f"\n{d['content']}")
             lines.append('\n'+'-'*60+'\n')
         text = '\n'.join(lines)
         QApplication.clipboard().setText(text)

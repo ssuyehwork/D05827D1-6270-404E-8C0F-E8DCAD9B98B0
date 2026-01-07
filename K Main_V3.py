@@ -3,6 +3,20 @@
 import sys
 import time
 import os
+import logging
+import traceback
+
+# --- Setup Logging ---
+log_format = '%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+logging.basicConfig(filename='app_log.txt', level=logging.DEBUG, format=log_format, filemode='w')
+
+def excepthook(exc_type, exc_value, exc_tb):
+    logging.error("Unhandled exception:", exc_info=(exc_type, exc_value, exc_tb))
+    traceback.print_exception(exc_type, exc_value, exc_tb)
+
+sys.excepthook = excepthook
+# --- End Logging Setup ---
+
 from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QDialog
 from PyQt5.QtCore import QObject, Qt
 from PyQt5.QtGui import QIcon, QPixmap

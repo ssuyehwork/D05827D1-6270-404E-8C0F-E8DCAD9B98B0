@@ -9,6 +9,7 @@ from core.config import DB_NAME, COLORS
 class DatabaseManager:
     def __init__(self):
         self.conn = sqlite3.connect(DB_NAME)
+        self.conn.row_factory = sqlite3.Row
         self._init_schema()
         # 【维护】启动时仅修正回收站数据的格式
         self._fix_trash_consistency()
