@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # ui/quick_window.py
+
 import sys
 import os
 import ctypes
@@ -7,6 +8,7 @@ from ctypes import wintypes
 import time
 import datetime
 import subprocess
+
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QListWidget, QLineEdit, 
                              QListWidgetItem, QHBoxLayout, QTreeWidget, QTreeWidgetItem, 
                              QPushButton, QStyle, QAction, QSplitter, QGraphicsDropShadowEffect, 
@@ -14,6 +16,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QListWidget, QL
                              QColorDialog, QInputDialog, QMessageBox)
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSettings, QUrl, QMimeData, pyqtSignal, QObject, QSize, QByteArray
 from PyQt5.QtGui import QImage, QColor, QCursor, QPixmap, QPainter, QIcon, QKeySequence, QDrag
+
 from services.preview_service import PreviewService
 from ui.dialogs import EditDialog
 from ui.advanced_tag_selector import AdvancedTagSelector
@@ -24,15 +27,18 @@ from ui.utils import create_svg_icon
 if sys.platform == "win32":
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
+    
     KEYEVENTF_KEYUP = 0x0002
     VK_CONTROL = 0x11
     VK_V = 0x56
+    
     HWND_TOPMOST = -1
     HWND_NOTOPMOST = -2
     SWP_NOMOVE = 0x0002
     SWP_NOSIZE = 0x0001
     SWP_NOACTIVATE = 0x0010
     SWP_FLAGS = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+
     class GUITHREADINFO(ctypes.Structure):
         _fields_ = [
             ("cbSize", wintypes.DWORD),
@@ -45,6 +51,7 @@ if sys.platform == "win32":
             ("hwndCaret", wintypes.HWND),
             ("rcCaret", wintypes.RECT)
         ]
+    
     user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO)]
     user32.GetGUIThreadInfo.restype = wintypes.BOOL
     user32.SetFocus.argtypes = [wintypes.HWND]
@@ -75,12 +82,14 @@ class DraggableListWidget(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragEnabled(True)
+
     def startDrag(self, supportedActions):
         item = self.currentItem()
         if not item: return
         data = item.data(Qt.UserRole)
         if not data: return
         idea_id = data['id']
+        
         mime = QMimeData()
         mime.setData('application/x-idea-id', str(idea_id).encode())
         drag = QDrag(self)
@@ -90,12 +99,14 @@ class DraggableListWidget(QListWidget):
 class DropTreeWidget(QTreeWidget):
     item_dropped = pyqtSignal(int, int)
     order_changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDropIndicatorShown(True)
+
     def dragEnterEvent(self, event):
         if event.source() == self:
             super().dragEnterEvent(event)
@@ -104,6 +115,7 @@ class DropTreeWidget(QTreeWidget):
             event.accept()
         else:
             event.ignore()
+
     def dragMoveEvent(self, event):
         if event.source() == self:
             super().dragMoveEvent(event)
@@ -118,6 +130,7 @@ class DropTreeWidget(QTreeWidget):
             event.ignore()
         else:
             event.ignore()
+
     def dropEvent(self, event):
         if event.mimeData().hasFormat('application/x-idea-id'):
             try:
@@ -164,10 +177,8 @@ QListWidget::item:selected, QTreeWidget::item:selected {
     background-color: #4a90e2; color: #FFFFFF;
 }
 QListWidget::item:hover { background-color: #444444; }
-
 QSplitter::handle { background-color: #333333; width: 2px; }
 QSplitter::handle:hover { background-color: #4a90e2; }
-
 QLineEdit {
     background-color: #252526;
     border: 1px solid #333333;
@@ -175,7 +186,6 @@ QLineEdit {
     padding: 6px;
     font-size: 16px;
 }
-
 QPushButton#ToolButton, QPushButton#MinButton, QPushButton#CloseButton, QPushButton#PinButton, QPushButton#MaxButton { 
     background-color: transparent; 
     border-radius: 4px; 
@@ -211,19 +221,23 @@ class QuickWindow(QWidget):
         super().__init__()
         self.db = db_manager
         self.settings = QSettings("MyTools", "RapidNotes")
+        
         self.m_drag = False
         self.m_DragPosition = QPoint()
         self.resize_area = None
         self._is_pinned = False
+        
         self.last_active_hwnd = None
         self.last_focus_hwnd = None
         self.last_thread_id = None
         self.my_hwnd = None
+        
         self.cm = ClipboardManager(self.db)
         self.clipboard = QApplication.clipboard()
         self.clipboard.dataChanged.connect(self.on_clipboard_changed)
         self.cm.data_captured.connect(self._update_list)
         self._processing_clipboard = False
+        
         self.open_dialogs = []
         self.preview_service = PreviewService(self.db, self)
         
@@ -233,29 +247,38 @@ class QuickWindow(QWidget):
         
         self.setMouseTracking(True)
         self.container.setMouseTracking(True)
+        
         self.monitor_timer = QTimer(self)
         self.monitor_timer.timeout.connect(self._monitor_foreground_window)
+        # 保持监控频率，但移除了内部的危险操作
         if user32: self.monitor_timer.start(200)
+        
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._update_list)
+        
         self.search_box.textChanged.connect(self._on_search_text_changed)
         self.list_widget.itemActivated.connect(self._on_item_activated)
+        
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_list_context_menu)
+        
         self.partition_tree.currentItemChanged.connect(self._on_partition_selection_changed)
         self.partition_tree.item_dropped.connect(self._handle_category_drop)
         self.partition_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.partition_tree.customContextMenuRequested.connect(self._show_partition_context_menu)
         self.partition_tree.order_changed.connect(self._save_partition_order)
+        
         self.clear_action.triggered.connect(self.search_box.clear)
         self.search_box.textChanged.connect(lambda text: self.clear_action.setVisible(bool(text)))
         self.clear_action.setVisible(False)
+        
         self.btn_stay_top.clicked.connect(self._toggle_stay_on_top)
         self.btn_toggle_side.clicked.connect(self._toggle_partition_panel)
         self.btn_open_full.clicked.connect(self.toggle_main_window_requested)
         self.btn_minimize.clicked.connect(self.showMinimized) 
         self.btn_close.clicked.connect(self.close)
+        
         self._update_partition_tree()
         self._update_list()
         self.partition_tree.currentItemChanged.connect(self._update_partition_status_display)
@@ -268,15 +291,18 @@ class QuickWindow(QWidget):
         
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(15, 15, 15, 15) 
+        
         self.container = QWidget()
         self.container.setObjectName("Container")
         self.root_layout.addWidget(self.container)
+        
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(25)
         shadow.setXOffset(0)
         shadow.setYOffset(4)
         shadow.setColor(QColor(0, 0, 0, 100))
         self.container.setGraphicsEffect(shadow)
+        
         self.setStyleSheet(DARK_STYLESHEET)
         
         self.main_layout = QVBoxLayout(self.container)
@@ -286,38 +312,47 @@ class QuickWindow(QWidget):
         title_bar_layout = QHBoxLayout()
         title_bar_layout.setContentsMargins(0, 0, 0, 0)
         title_bar_layout.setSpacing(5)
+        
         self.title_label = QLabel("⚡️ 快速笔记")
         self.title_label.setObjectName("TitleLabel")
         title_bar_layout.addWidget(self.title_label)
+        
         title_bar_layout.addStretch()
+        
         self.btn_stay_top = QPushButton("📌", self)
         self.btn_stay_top.setObjectName("PinButton")
         self.btn_stay_top.setToolTip("保持置顶")
         self.btn_stay_top.setCheckable(True)
         self.btn_stay_top.setFixedSize(32, 32)
+        
         self.btn_toggle_side = QPushButton("👁️", self)
         self.btn_toggle_side.setObjectName("ToolButton")
         self.btn_toggle_side.setToolTip("显示/隐藏侧边栏")
         self.btn_toggle_side.setFixedSize(32, 32)
+        
         self.btn_open_full = QPushButton(self)
         self.btn_open_full.setObjectName("MaxButton")
         self.btn_open_full.setToolTip("切换主程序界面")
         self.btn_open_full.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
         self.btn_open_full.setFixedSize(32, 32)
+        
         self.btn_minimize = QPushButton("—", self)
         self.btn_minimize.setObjectName("MinButton")
         self.btn_minimize.setToolTip("最小化")
         self.btn_minimize.setFixedSize(32, 32)
+        
         self.btn_close = QPushButton(self)
         self.btn_close.setObjectName("CloseButton")
         self.btn_close.setToolTip("关闭")
         self.btn_close.setIcon(self.style().standardIcon(QStyle.SP_TitleBarCloseButton))
         self.btn_close.setFixedSize(32, 32)
+        
         title_bar_layout.addWidget(self.btn_stay_top)
         title_bar_layout.addWidget(self.btn_toggle_side)
         title_bar_layout.addWidget(self.btn_open_full) 
         title_bar_layout.addWidget(self.btn_minimize)
         title_bar_layout.addWidget(self.btn_close)
+        
         self.main_layout.addLayout(title_bar_layout)
         
         self.search_box = QLineEdit(self)
@@ -330,24 +365,29 @@ class QuickWindow(QWidget):
         content_widget = QWidget()
         content_layout = QHBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setHandleWidth(4)
+        
         self.list_widget = DraggableListWidget()
         self.list_widget.setFocusPolicy(Qt.StrongFocus)
         self.list_widget.setAlternatingRowColors(True)
         self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_widget.setIconSize(QSize(120, 90))
+        
         self.partition_tree = DropTreeWidget()
         self.partition_tree.setHeaderHidden(True)
         self.partition_tree.setFocusPolicy(Qt.NoFocus)
         self.partition_tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.partition_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
         self.splitter.addWidget(self.list_widget)
         self.splitter.addWidget(self.partition_tree)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
         self.splitter.setSizes([550, 150])
+        
         content_layout.addWidget(self.splitter)
         self.main_layout.addWidget(content_widget, 1)
         
@@ -387,7 +427,7 @@ class QuickWindow(QWidget):
             is_fav = data['is_favorite']
             is_locked = data['is_locked']
             rating = data['rating']
-
+            
             # --- 菜单样式优化 ---
             menu = QMenu(self)
             menu.setStyleSheet("""
@@ -397,14 +437,16 @@ class QuickWindow(QWidget):
                 QMenu::separator { background-color: #444; height: 1px; margin: 4px 0px; }
                 QMenu::icon { position: absolute; left: 6px; top: 6px; }
             """)
-
+            
             action_preview = menu.addAction("👁️ 预览 (Space)")
             action_preview.triggered.connect(self._do_preview)
             menu.addSeparator()
+            
             action_copy = menu.addAction("📋 复制内容")
             action_copy.triggered.connect(lambda: self._copy_item_content(data))
+            
             menu.addSeparator()
-
+            
             rating_menu = menu.addMenu(create_svg_icon('star.svg', '#f39c12'), "⭐ 设置星级")
             from PyQt5.QtWidgets import QActionGroup
             star_group = QActionGroup(self)
@@ -419,12 +461,11 @@ class QuickWindow(QWidget):
             action_clear_rating = rating_menu.addAction("清除评级")
             action_clear_rating.triggered.connect(lambda: self._do_set_rating(0))
             
-            # 【核心修改】
             if is_locked:
                 menu.addAction(create_svg_icon('lock.svg', COLORS['success']), "解锁", self._do_lock_selected)
             else:
                 menu.addAction(create_svg_icon('lock.svg', '#aaaaaa'), "锁定 (Ctrl+S)", self._do_lock_selected)
-
+                
             if is_pinned:
                 action_pin = menu.addAction(create_svg_icon('pin_vertical.svg', '#e74c3c'), "取消置顶")
             else:
@@ -434,7 +475,6 @@ class QuickWindow(QWidget):
             action_fav = menu.addAction(create_svg_icon('bookmark.svg', '#ff6b81'), "取消书签" if is_fav else "添加书签")
             action_fav.triggered.connect(self._do_toggle_favorite)
             
-            # 允许编辑
             action_edit = menu.addAction(create_svg_icon('action_edit.svg', '#4a90e2'), "编辑")
             action_edit.triggered.connect(self._do_edit_selected)
             
@@ -446,7 +486,7 @@ class QuickWindow(QWidget):
             else:
                 del_action = menu.addAction(create_svg_icon('action_delete.svg', '#555555'), "删除 (已锁定)")
                 del_action.setEnabled(False)
-
+            
             menu.exec_(self.list_widget.mapToGlobal(pos))
         except Exception as e:
             logging.critical(f"Critical error in _show_list_context_menu: {e}", exc_info=True)
@@ -489,7 +529,6 @@ class QuickWindow(QWidget):
     def _do_edit_selected(self):
         iid = self._get_selected_id()
         if iid:
-            # 允许编辑
             for dialog in self.open_dialogs:
                 if hasattr(dialog, 'idea_id') and dialog.idea_id == iid: dialog.activateWindow(); return
             dialog = EditDialog(self.db, idea_id=iid, parent=None)
@@ -526,7 +565,6 @@ class QuickWindow(QWidget):
             self._update_list()
 
     def _handle_category_drop(self, idea_id, cat_id):
-        # 允许移动，除非删除到回收站
         target_item = None
         it = QTreeWidgetItemIterator(self.partition_tree)
         while it.value():
@@ -535,6 +573,7 @@ class QuickWindow(QWidget):
             if data and data.get('id') == cat_id:
                 target_item = item; break
             it += 1
+        
         if not target_item: return
         target_data = target_item.data(0, Qt.UserRole)
         target_type = target_data.get('type')
@@ -547,6 +586,7 @@ class QuickWindow(QWidget):
         elif target_type == 'trash': self.db.set_deleted(idea_id, True)
         elif target_type == 'uncategorized': self.db.move_category(idea_id, None)
         elif target_type == 'partition': self.db.move_category(idea_id, cat_id)
+        
         self._update_list(); self._update_partition_tree()
 
     def _save_partition_order(self):
@@ -571,13 +611,16 @@ class QuickWindow(QWidget):
             screen_geo = QApplication.desktop().screenGeometry()
             win_geo = self.geometry()
             self.move((screen_geo.width() - win_geo.width()) // 2, (screen_geo.height() - win_geo.height()) // 2)
+            
         splitter_hex = load_setting("quick_window_splitter_hex")
         if splitter_hex:
             try: self.splitter.restoreState(QByteArray.fromHex(splitter_hex.encode()))
             except: pass
+            
         is_hidden = load_setting("partition_panel_hidden", False)
         self.partition_tree.setHidden(is_hidden)
         self._update_partition_status_display()
+        
         is_pinned = load_setting("quick_window_pinned", False)
         self.btn_stay_top.setChecked(is_pinned)
         self._toggle_stay_on_top()
@@ -622,22 +665,26 @@ class QuickWindow(QWidget):
         if event.buttons() == Qt.NoButton:
             self._set_cursor_shape(self._get_resize_area(event.pos()))
             event.accept(); return
+        
         if event.buttons() == Qt.LeftButton:
             if self.resize_area:
                 global_pos = event.globalPos()
                 rect = self.geometry()
+                
                 if 'left' in self.resize_area:
                     new_w = rect.right() - global_pos.x()
                     if new_w > 100: rect.setLeft(global_pos.x())
                 elif 'right' in self.resize_area:
                     new_w = global_pos.x() - rect.left()
                     if new_w > 100: rect.setWidth(new_w)
+                    
                 if 'top' in self.resize_area:
                     new_h = rect.bottom() - global_pos.y()
                     if new_h > 100: rect.setTop(global_pos.y())
                 elif 'bottom' in self.resize_area:
                     new_h = global_pos.y() - rect.top()
                     if new_h > 100: rect.setHeight(new_h)
+                
                 self.setGeometry(rect)
                 event.accept()
             elif self.m_drag:
@@ -652,24 +699,18 @@ class QuickWindow(QWidget):
         super().showEvent(event)
 
     def _monitor_foreground_window(self):
+        """
+        修正后的监控方法：
+        仅记录前台窗口句柄，移除了导致系统卡顿的 AttachThreadInput 逻辑。
+        """
         if not user32: return 
         current_hwnd = user32.GetForegroundWindow()
         if current_hwnd == 0 or current_hwnd == self.my_hwnd: return
+        
         if current_hwnd != self.last_active_hwnd:
             self.last_active_hwnd = current_hwnd
             self.last_thread_id = user32.GetWindowThreadProcessId(current_hwnd, None)
-            self.last_focus_hwnd = None
-            curr_thread = kernel32.GetCurrentThreadId()
-            attached = False
-            if curr_thread != self.last_thread_id: attached = user32.AttachThreadInput(curr_thread, self.last_thread_id, True)
-            try:
-                gui_info = GUITHREADINFO()
-                gui_info.cbSize = ctypes.sizeof(GUITHREADINFO)
-                if user32.GetGUIThreadInfo(self.last_thread_id, ctypes.byref(gui_info)):
-                    self.last_focus_hwnd = gui_info.hwndFocus or gui_info.hwndActive
-            except: pass
-            finally:
-                if attached: user32.AttachThreadInput(curr_thread, self.last_thread_id, False)
+            self.last_focus_hwnd = None # 移除焦点控件记录，由系统自动处理
 
     def _on_search_text_changed(self): self.search_timer.start(300)
 
@@ -677,40 +718,50 @@ class QuickWindow(QWidget):
         search_text = self.search_box.text()
         current_partition = self.partition_tree.currentItem()
         f_type, f_val = 'all', None
+        
         if current_partition:
             partition_data = current_partition.data(0, Qt.UserRole)
             if partition_data:
                 p_type = partition_data.get('type')
                 if p_type == 'partition': f_type, f_val = 'category', partition_data.get('id')
-        elif p_type in ['all', 'today', 'uncategorized', 'untagged', 'bookmark', 'trash']: f_type, f_val = p_type, None
+                elif p_type in ['all', 'today', 'uncategorized', 'untagged', 'bookmark', 'trash']: f_type, f_val = p_type, None
+
         items = self.db.get_ideas(search=search_text, f_type=f_type, f_val=f_val)
         self.list_widget.clear()
         categories = {c[0]: c[1] for c in self.db.get_categories()}
+        
         for item_tuple in items:
             list_item = QListWidgetItem()
             list_item.setData(Qt.UserRole, item_tuple)
+            
             item_type = item_tuple['item_type'] or 'text'
             if item_type == 'image':
                 blob_data = item_tuple['data_blob']
                 if blob_data:
                     pixmap = QPixmap(); pixmap.loadFromData(blob_data)
                     if not pixmap.isNull(): list_item.setIcon(QIcon(pixmap))
+            
             display_text = self._get_content_display(item_tuple)
             list_item.setText(display_text)
+            
             idea_id = item_tuple['id']; category_id = item_tuple['category_id']
             cat_name = categories.get(category_id, "未分类")
             tags = self.db.get_tags(idea_id); tags_str = " ".join([f"#{t}" for t in tags]) if tags else "无"
+            
             list_item.setToolTip(f"📂 分区: {cat_name}\n🏷️ 标签: {tags_str}")
             self.list_widget.addItem(list_item)
+            
         if self.list_widget.count() > 0: self.list_widget.setCurrentRow(0)
 
     def _get_content_display(self, item_tuple):
         title = item_tuple['title']; content = item_tuple['content']; prefix = ""
         rating = item_tuple['rating'] or 0
+        
         if rating > 0: prefix += f"{'★'*rating} "
         if item_tuple['is_locked']: prefix += "🔒 "
         if item_tuple['is_pinned']: prefix += "📌 "
         if item_tuple['is_favorite']: prefix += "🔖 "
+        
         item_type = item_tuple['item_type'] or 'text'
         text_part = title if item_type in ['image', 'file'] else (title if title else (content if content else ""))
         text_part = text_part.replace('\n', ' ').replace('\r', '').strip()[:150]
@@ -725,17 +776,21 @@ class QuickWindow(QWidget):
     def _update_partition_tree(self):
         current_selection_data = None
         if self.partition_tree.currentItem(): current_selection_data = self.partition_tree.currentItem().data(0, Qt.UserRole)
+        
         self.partition_tree.clear()
         counts = self.db.get_counts(); partition_counts = counts.get('categories', {})
         static_items = [("全部数据", 'all', 'all_data.svg'), ("今日数据", 'today', 'today.svg'), ("未分类", 'uncategorized', 'uncategorized.svg'), ("未标签", 'untagged', 'untagged.svg'), ("书签", 'bookmark', 'bookmark.svg'), ("回收站", 'trash', 'trash.svg')]
         id_map = {'all': -1, 'today': -5, 'uncategorized': -15, 'untagged': -16, 'bookmark': -20, 'trash': -30}
+        
         for name, key, icon_filename in static_items:
             data = {'type': key, 'id': id_map.get(key)}
             item = QTreeWidgetItem(self.partition_tree, [f"{name} ({counts.get(key, 0)})"])
             item.setData(0, Qt.UserRole, data)
             item.setIcon(0, create_svg_icon(icon_filename))
+            
         self._add_partition_recursive(self.db.get_partitions_tree(), self.partition_tree, partition_counts)
         self.partition_tree.expandAll()
+        
         if current_selection_data:
             it = QTreeWidgetItemIterator(self.partition_tree)
             while it.value():
@@ -797,12 +852,18 @@ class QuickWindow(QWidget):
         if not user32: return
         target_win = self.last_active_hwnd; target_focus = self.last_focus_hwnd; target_thread = self.last_thread_id
         if not target_win or not user32.IsWindow(target_win): return
+        
         curr_thread = kernel32.GetCurrentThreadId(); attached = False
+        # 仅在需要粘贴的一瞬间进行挂靠
         if target_thread and curr_thread != target_thread: attached = user32.AttachThreadInput(curr_thread, target_thread, True)
+        
         try:
             if user32.IsIconic(target_win): user32.ShowWindow(target_win, 9)
             user32.SetForegroundWindow(target_win)
+            
+            # 如果之前有记录焦点控件，尝试恢复；如果没有，SetForegroundWindow通常已足够
             if target_focus and user32.IsWindow(target_focus): user32.SetFocus(target_focus)
+            
             time.sleep(0.1)
             user32.keybd_event(VK_CONTROL, 0, 0, 0); user32.keybd_event(VK_V, 0, 0, 0)
             user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0); user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
@@ -831,11 +892,14 @@ class QuickWindow(QWidget):
             item = self.partition_tree.itemAt(pos)
             menu = QMenu(self)
             menu.setStyleSheet(f"background-color: {COLORS.get('bg_dark', '#2d2d2d')}; color: white; border: 1px solid #444;")
+            
             if not item:
                 menu.addAction('➕ 新建分组', self._new_group); menu.exec_(self.partition_tree.mapToGlobal(pos)); return
+                
             data = item.data(0, Qt.UserRole)
             if data and data.get('type') == 'partition':
                 cat_id = data.get('id'); raw_text = item.text(0); current_name = raw_text.split(' (')[0]
+                
                 menu.addAction('➕ 新建数据', lambda: self._request_new_data(cat_id))
                 menu.addSeparator()
                 menu.addAction('🎨 设置颜色', lambda: self._change_color(cat_id))
@@ -845,6 +909,7 @@ class QuickWindow(QWidget):
                 menu.addAction('➕ 新建分区', lambda: self._new_zone(cat_id))
                 menu.addAction('✏️ 重命名', lambda: self._rename_category(cat_id, current_name))
                 menu.addAction('🗑️ 删除', lambda: self._del_category(cat_id))
+                
                 menu.exec_(self.partition_tree.mapToGlobal(pos))
             else:
                  if not item: menu.addAction('➕ 新建分组', self._new_group); menu.exec_(self.partition_tree.mapToGlobal(pos))
@@ -875,6 +940,7 @@ class QuickWindow(QWidget):
         child_count = c.fetchone()[0]
         msg = '确认删除此分类? (其中的内容将移至未分类)'
         if child_count > 0: msg = f'此组包含 {child_count} 个区，确认一并删除?\n(所有内容都将移至未分类)'
+        
         if QMessageBox.Yes == QMessageBox.question(self, '确认删除', msg):
             c.execute("SELECT id FROM categories WHERE parent_id = ?", (cid,))
             child_ids = [row[0] for row in c.fetchall()]
@@ -888,16 +954,22 @@ class QuickWindow(QWidget):
     def _set_preset_tags(self, cat_id):
         current_tags = self.db.get_category_preset_tags(cat_id)
         dlg = QDialog(self); dlg.setWindowTitle("🏷️ 设置预设标签"); dlg.setStyleSheet(f"background-color: {COLORS.get('bg_dark', '#2d2d2d')}; color: #EEE;"); dlg.setFixedSize(350, 150)
+        
         layout = QVBoxLayout(dlg); layout.setContentsMargins(20, 20, 20, 20)
         info = QLabel("拖入该分类时自动绑定以下标签：\n(双击输入框选择历史标签)"); info.setStyleSheet("color: #888; font-size: 12px; margin-bottom: 5px;"); layout.addWidget(info)
+        
         inp = ClickableLineEdit(); inp.setText(current_tags); inp.setPlaceholderText("例如: 工作, 重要 (逗号分隔)"); inp.setStyleSheet(f"background-color: {COLORS.get('bg_mid', '#333')}; border: 1px solid #444; padding: 6px; border-radius: 4px; color: white;"); layout.addWidget(inp)
+        
         def open_tag_selector():
             initial_list = [t.strip() for t in inp.text().split(',') if t.strip()]
             selector = AdvancedTagSelector(self.db, idea_id=None, initial_tags=initial_list)
             def on_confirmed(tags): inp.setText(', '.join(tags))
             selector.tags_confirmed.connect(on_confirmed); selector.show_at_cursor()
+            
         inp.doubleClicked.connect(open_tag_selector)
+        
         btns = QHBoxLayout(); btns.addStretch(); btn_ok = QPushButton("完成"); btn_ok.setStyleSheet(f"background-color: {COLORS.get('primary', '#0078D4')}; border:none; padding: 5px 15px; border-radius: 4px; font-weight:bold; color: white;"); btn_ok.clicked.connect(dlg.accept); btns.addWidget(btn_ok); layout.addLayout(btns)
+        
         if dlg.exec_() == QDialog.Accepted:
             new_tags = inp.text().strip(); self.db.set_category_preset_tags(cat_id, new_tags)
             tags_list = [t.strip() for t in new_tags.split(',') if t.strip()]
