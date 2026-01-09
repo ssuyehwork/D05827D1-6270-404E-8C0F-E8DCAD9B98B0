@@ -232,11 +232,15 @@ class DatabaseManager:
 
     def add_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         c = self.conn.cursor()
+        c = self.conn.cursor()
         hasher = hashlib.sha256()
-        if item_type == 'text' or item_type == 'file':
-            hasher.update(content.encode('utf-8'))
-        elif item_type == 'image' and data_blob:
+        
+        # 【逻辑修正】除去明确的image类型外，其他所有类型(text, pdf, folder...)都按内容字符hash
+        if item_type == 'image' and data_blob:
             hasher.update(data_blob)
+        else:
+            hasher.update(content.encode('utf-8'))
+            
         content_hash = hasher.hexdigest()
 
         c.execute("SELECT id FROM ideas WHERE content_hash = ?", (content_hash,))
@@ -248,14 +252,20 @@ class DatabaseManager:
             self.conn.commit()
             return idea_id, False 
         else:
+            # 【逻辑修正】标题生成逻辑
             if item_type == 'text':
                 title = content.strip().split('\n')[0][:50]
             elif item_type == 'image':
                 title = "[图片]"
-            elif item_type == 'file':
-                title = f"[文件] {os.path.basename(content.split(';')[0])}"
             else:
-                title = "未命名"
+                # 其他所有类型（file, pdf, folder...）均视为文件类，显示文件名
+                # 尝试从内容中获取第一个文件名
+                try:
+                    first_file = content.split(';')[0]
+                    fname = os.path.basename(first_file)
+                    title = f"[{item_type}] {fname}"
+                except:
+                    title = f"[{item_type}]"
 
             default_color = COLORS['default_note']
             c.execute(
@@ -360,6 +370,16 @@ class DatabaseManager:
         return c.fetchone()
 
     # === 核心修改：get_filter_stats 支持上下文 ===
+    def _get_all_child_categories(self, cat_id):
+        """递归获取所有子分类ID"""
+        ids = [cat_id]
+        c = self.conn.cursor()
+        c.execute("SELECT id FROM categories WHERE parent_id = ?", (cat_id,))
+        children = c.fetchall()
+        for child_row in children:
+            ids.extend(self._get_all_child_categories(child_row[0]))
+        return ids
+
     def get_filter_stats(self, search_text='', filter_type='all', filter_value=None):
         """
         获取当前视图范围内的各项统计，用于填充筛选器
@@ -387,8 +407,11 @@ class DatabaseManager:
             if filter_value is None:
                 where_clauses.append("i.category_id IS NULL")
             else:
-                where_clauses.append("i.category_id=?")
-                params.append(filter_value)
+                # 递归包含子分类
+                cat_ids = self._get_all_child_categories(filter_value)
+                placeholders = ','.join('?' * len(cat_ids))
+                where_clauses.append(f"i.category_id IN ({placeholders})")
+                params.extend(cat_ids)
         elif filter_type == 'today':
             where_clauses.append("date(i.updated_at,'localtime')=date('now','localtime')")
         elif filter_type == 'untagged':
@@ -466,8 +489,14 @@ class DatabaseManager:
         else: q += ' AND (i.is_deleted=0 OR i.is_deleted IS NULL)'
         
         if f_type == 'category':
-            if f_val is None: q += ' AND i.category_id IS NULL'
-            else: q += ' AND i.category_id=?'; p.append(f_val)
+            if f_val is None: 
+                q += ' AND i.category_id IS NULL'
+            else: 
+                # 递归包含子分类
+                cat_ids = self._get_all_child_categories(f_val)
+                placeholders = ','.join('?' * len(cat_ids))
+                q += f" AND i.category_id IN ({placeholders})"
+                p.extend(cat_ids)
         elif f_type == 'today': q += " AND date(i.updated_at,'localtime')=date('now','localtime')"
         elif f_type == 'untagged': q += ' AND i.id NOT IN (SELECT idea_id FROM idea_tags)'
         elif f_type == 'bookmark': q += ' AND i.is_favorite=1'

@@ -61,6 +61,7 @@ _system_icons = {
     'win_restore.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="10" height="10" rx="1"/><rect x="11" y="3" width="10" height="10" rx="1"/></svg>""",
     'win_min.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>""",
     'win_sidebar.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>""",
+    'sidebar_right.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>""",
 
     # --- 功能操作 ---
     'action_add.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>""",
@@ -112,7 +113,8 @@ _system_icons = {
     'book-open.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>""",
     'zap.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>""",
     'monitor.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>""",
-    'power.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>"""
+    'power.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>""",
+    'palette.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>"""
 }
 
 # 全局图标缓存
@@ -179,33 +181,46 @@ def create_clear_button_icon():
     专门为 QLineEdit 的 clearButton 生成一个经典的 '×' 图标,
     并返回其文件路径, 供 QSS 使用。
     """
-    import tempfile
-    
-    # 定义一个经典的 '×' SVG
-    svg_data = """
-    <svg viewBox="0 0 24 24" fill="none" stroke="#999999" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="18" y1="6" x2="6" y2="18"/>
-        <line x1="6" y1="6" x2="18" y2="18"/>
-    </svg>
+    return get_svg_path('clear.svg', '#999999') # 使用封装后的函数
+
+def get_svg_path(icon_name, color):
     """
+    根据图标名和颜色生成一个 SVG 文件路径，供 QSS 使用。
+    """
+    import tempfile
+    import os
+    from PyQt5.QtCore import QByteArray
     
-    # 检查缓存
+    # 获取 SVG 数据
+    svg_data = ""
+    if icon_name == 'clear.svg':
+        svg_data = """
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+        """
+    elif icon_name in _system_icons:
+        svg_data = _system_icons[icon_name]
+    
+    if not svg_data:
+        return ""
+
+    # 替换颜色
+    svg_data = svg_data.replace("currentColor", color)
+    
+    # 生成临时文件路径
     temp_dir = tempfile.gettempdir()
-    icon_path = os.path.join(temp_dir, "clear_icon.png")
+    safe_color = color.replace('#', '')
+    filename = f"qss_icon_{icon_name}_{safe_color}.svg"
+    icon_path = os.path.join(temp_dir, filename).replace("\\", "/")
     
-    if os.path.exists(icon_path):
-        return icon_path.replace("\\", "/") # 确保路径格式正确
-        
-    renderer = QSvgRenderer(QByteArray(svg_data.encode('utf-8')))
-    pixmap = QPixmap(32, 32)
-    pixmap.fill(Qt.transparent)
-    
-    painter = QPainter(pixmap)
-    renderer.render(painter)
-    painter.end()
-    
-    pixmap.save(icon_path, "PNG")
-    
-    # 确保 QSS 能正确使用路径
-    return icon_path.replace("\\", "/")
+    if not os.path.exists(icon_path):
+        try:
+            with open(icon_path, 'w', encoding='utf-8') as f:
+                f.write(svg_data)
+        except Exception:
+            pass
+            
+    return icon_path
 

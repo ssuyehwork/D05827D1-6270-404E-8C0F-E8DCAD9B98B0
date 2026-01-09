@@ -797,7 +797,7 @@ class QuickWindow(QWidget):
         if item_tuple['is_favorite']: prefix += "🔖 "
         
         item_type = item_tuple['item_type'] or 'text'
-        text_part = title if item_type in ['image', 'file'] else (title if title else (content if content else ""))
+        text_part = title if item_type != 'text' else (content if content else "")
         text_part = text_part.replace('\n', ' ').replace('\r', '').strip()[:150]
         return prefix + text_part
 
@@ -873,7 +873,8 @@ class QuickWindow(QWidget):
             if item_type == 'image':
                 if item_tuple['data_blob']:
                     image = QImage(); image.loadFromData(item_tuple['data_blob']); clipboard.setImage(image)
-            elif item_type == 'file':
+            elif item_type != 'text':
+                # 任何非 Image 非 Text 的都视为文件类型处理
                 if item_tuple['content']:
                     mime_data = QMimeData(); mime_data.setUrls([QUrl.fromLocalFile(p) for p in item_tuple['content'].split(';') if p])
                     clipboard.setMimeData(mime_data)

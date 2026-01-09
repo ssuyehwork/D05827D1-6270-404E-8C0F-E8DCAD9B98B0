@@ -11,6 +11,7 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 
 # 导入 Container 和 Views
 from core.container import AppContainer
+from core.signals import app_signals
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
 from ui.ball import FloatingBall
@@ -130,11 +131,17 @@ class AppManager(QObject):
         
         self._init_tray_icon()
         
+        # 连接全局信号
+        app_signals.data_changed.connect(self.main_window._refresh_all)
+        app_signals.data_changed.connect(self.quick_window._update_list)
+        app_signals.data_changed.connect(self.quick_window._update_partition_tree)
+
         # 注册全局热键 Alt+Space
         try:
             keyboard.add_hotkey('alt+space', self._on_hotkey_triggered, suppress=False)
+            logging.info("Global hotkey Alt+Space registered successfully")
         except Exception as e:
-            logging.error(f"Failed to register hotkey: {e}")
+            logging.error(f"Failed to register hotkey Alt+Space: {e}", exc_info=True)
 
         self.show_quick_window()
 
@@ -190,15 +197,11 @@ class AppManager(QObject):
         if not idea_data: return
         is_favorite = idea_data['is_favorite'] == 1
         self.service.set_favorite(idea_id, not is_favorite)
-        if self.main_window.isVisible():
-            self.main_window._load_data(); self.main_window.sidebar.refresh()
 
     def _handle_popup_tag_toggle(self, idea_id, tag_name):
         current_tags = self.service.get_tags(idea_id)
         if tag_name in current_tags: self.service.remove_tag_from_multiple_ideas([idea_id], tag_name)
         else: self.service.add_tags_to_multiple_ideas([idea_id], [tag_name])
-        if self.main_window.isVisible():
-            self.main_window._load_data(); self.main_window._refresh_metadata_panel()
 
     def _force_activate(self, window):
         if not window: return
@@ -217,15 +220,27 @@ class AppManager(QObject):
     def on_main_window_closing(self):
         if self.main_window: self.main_window.hide()
     def quit_application(self):
+        logging.info("Application quit requested")
         try:
             keyboard.unhook_all()
-        except: pass
+            logging.debug("Keyboard hooks removed")
+        except Exception as e:
+            logging.error(f"Failed to unhook keyboard: {e}", exc_info=True)
+        
         if self.quick_window:
-            try: self.quick_window.save_state()
-            except: pass
+            try:
+                self.quick_window.save_state()
+                logging.debug("Quick window state saved")
+            except Exception as e:
+                logging.error(f"Failed to save quick window state: {e}", exc_info=True)
+        
         if self.main_window:
-            try: self.main_window.save_state()
-            except: pass
+            try:
+                self.main_window.save_state()
+                logging.debug("Main window state saved")
+            except Exception as e:
+                logging.error(f"Failed to save main window state: {e}", exc_info=True)
+        
         self.app.quit()
 
 def main():

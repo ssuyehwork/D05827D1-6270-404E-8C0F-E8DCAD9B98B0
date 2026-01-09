@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QMimeData, QPoint
 from PyQt5.QtGui import QDrag, QPixmap, QPainter, QCursor, QColor, QPen
 from core.config import COLORS
 from core.shared import get_color_icon
-from ui.utils import create_svg_icon
+from ui.utils import create_svg_icon, get_svg_path
 import logging
 
 log = logging.getLogger("FilterPanel")
@@ -16,107 +16,112 @@ class FilterPanel(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.resize_margin = 8
+        self._block_item_click = False
+        
+        # Init member variables for resize
         self._drag_start_pos = None
         self._resize_start_pos = None
         self._resize_start_geometry = None
-        self._resize_edge = None  # 'right', 'bottom', 'corner'
-        self.resize_margin = 10  # 边缘检测区域宽度（增大到10像素更容易抓取）
+        self._resize_edge = None
         
-        # 启用鼠标跟踪以实时更新光标 - 但只在边缘区域
-        self.setMouseTracking(False)
-        
-        # 设置最小和默认尺寸
+        self.setMouseTracking(True)
         self.setMinimumSize(250, 350)
-        self.resize(280, 450)
         
-        # 主容器
-        self.container = QWidget()
+        # 初始化 UI
+        self._init_ui()
+        
+        # 初始化数据
+        self.roots = {}
+        self._init_tree_structure()
+        
+    def _init_ui(self):
+        # 主布局，带内边距以容纳边框和阴影
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 容器 Frame (用于实现圆角背景和边框，解决 TranslucentBackground 下的问题)
+        self.container = QFrame()
         self.container.setObjectName("FilterPanelContainer")
         self.container.setStyleSheet(f"""
-            #FilterPanelContainer {{
-                background-color: {COLORS['bg_dark']}; 
+            QFrame#FilterPanelContainer {{
+                background-color: {COLORS['bg_mid']};
                 border: 1px solid {COLORS['bg_light']};
-                border-radius: 12px;
+                border-radius: 8px;
+            }}
+            QTreeWidget {{
+                background-color: transparent;
+                border: none;
+                outline: none;
+            }}
+            QTreeWidget::item {{
+                height: 28px;
+                padding-left: 5px;
+            }}
+            QTreeWidget::item:hover {{
+                background-color: #2a2d2e;
+                border-radius: 4px;
+            }}
+            QTreeWidget::item:selected {{
+                background-color: #37373d;
+                color: {COLORS['text']};
+            }}
+            QTreeWidget::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid #666;
+            }}
+            QTreeWidget::indicator:checked {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+                image: url({get_svg_path('select.svg', 'white')}); 
             }}
         """)
         
-        # 外层布局（用于阴影）
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.addWidget(self.container)
+        # 顶部标题栏 + 重置按钮
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(12, 12, 12, 8)
         
-        # 添加阴影效果
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(20)
-        shadow.setXOffset(0)
-        shadow.setYOffset(4)
-        shadow.setColor(QColor(0, 0, 0, 150))
-        self.container.setGraphicsEffect(shadow)
-
-        # 内容布局
-        self.layout = QVBoxLayout(self.container)
-        self.layout.setContentsMargins(8, 8, 8, 8)
-        self.layout.setSpacing(8)
+        self.header = QLabel("高级筛选")
+        self.header.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLORS['text']};")
+        self.header.setCursor(Qt.SizeAllCursor)
         
-        # 标题栏（用于拖拽）
-        self.header = QWidget()
-        self.header.setFixedHeight(32)
-        self.header.setStyleSheet(f"background-color: {COLORS['bg_mid']}; border-radius: 6px;")
-        self.header.setCursor(Qt.SizeAllCursor)  # 移动光标
-        
-        header_layout = QHBoxLayout(self.header)
-        header_layout.setContentsMargins(10, 0, 10, 0)
-        
-        header_icon = QLabel()
-        header_icon.setPixmap(create_svg_icon("select.svg", COLORS['primary']).pixmap(16, 16))
-        header_layout.addWidget(header_icon)
-        
-        header_title = QLabel("🔍 高级筛选")
-        header_title.setStyleSheet(f"color: {COLORS['primary']}; font-size: 13px; font-weight: bold;")
-        header_layout.addWidget(header_title)
-        header_layout.addStretch()
-        
-        close_btn = QPushButton()
-        close_btn.setIcon(create_svg_icon('win_close.svg', '#888'))
-        close_btn.setFixedSize(24, 24)
-        close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; border: none; border-radius: 4px; }
-            QPushButton:hover { background-color: #e74c3c; }
+        self.btn_reset = QPushButton("重置")
+        self.btn_reset.setCursor(Qt.PointingHandCursor)
+        self.btn_reset.setStyleSheet(f"""
+            QPushButton {{
+                color: {COLORS['text_sub']};
+                background: transparent;
+                border: none;
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: #2a2d2e;
+                color: {COLORS['text']};
+            }}
         """)
-        close_btn.clicked.connect(self.hide)
-        header_layout.addWidget(close_btn)
+        self.btn_reset.clicked.connect(self.reset_filters)
         
-        self.layout.addWidget(self.header)
+        header_layout.addWidget(self.header)
+        header_layout.addStretch()
+        header_layout.addWidget(self.btn_reset)
         
-        # 树形筛选器
+        # 中间树形列表
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
-        self.tree.setIndentation(20)
         self.tree.setFocusPolicy(Qt.NoFocus)
+        self.tree.setIndentation(20)
         self.tree.setRootIsDecorated(True)
         self.tree.setUniformRowHeights(True)
         self.tree.setAnimated(True)
         self.tree.setAllColumnsShowFocus(True)
+        self.tree.clicked.connect(self._on_item_clicked)
+        self.tree.itemChanged.connect(self._on_item_changed)
         
+        # 滚动条样式
         self.tree.setStyleSheet(f"""
-            QTreeWidget {{
-                background-color: {COLORS['bg_dark']};
-                color: #ddd;
-                border: none;
-                font-size: 12px;
-            }}
-            QTreeWidget::item {{
-                height: 28px;
-                border-radius: 4px;
-                padding: 2px 5px;
-            }}
-            QTreeWidget::item:hover {{ background-color: #2a2d2e; }}
-            QTreeWidget::item:selected {{ background-color: #37373d; color: white; }}
-            QTreeWidget::indicator {{
-                width: 14px;
-                height: 14px;
-            }}
             QScrollBar:vertical {{ border: none; background: transparent; width: 6px; margin: 0px; }}
             QScrollBar::handle:vertical {{ background: #444; border-radius: 3px; min-height: 20px; }}
             QScrollBar::handle:vertical:hover {{ background: #555; }}
@@ -124,66 +129,63 @@ class FilterPanel(QWidget):
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
         """)
         
-        self.tree.itemChanged.connect(self._on_item_changed)
-        self.tree.itemClicked.connect(self._on_item_clicked)
-        self.layout.addWidget(self.tree)
-        
-        # 底部区域：重置按钮 + 调整大小手柄
+        # 底部调整大小手柄
         bottom_layout = QHBoxLayout()
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(4)
-        
-        # 重置按钮（缩窄宽度）
-        self.btn_reset = QPushButton("🔄 重置")
-        self.btn_reset.setCursor(Qt.PointingHandCursor)
-        self.btn_reset.setFixedWidth(80)
-        self.btn_reset.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['bg_mid']};
-                border: 1px solid #444;
-                color: #888;
-                border-radius: 6px;
-                padding: 8px;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{ color: #ddd; background-color: #333; }}
-        """)
-        self.btn_reset.clicked.connect(self.reset_filters)
-        bottom_layout.addWidget(self.btn_reset)
-        
+        bottom_layout.setContentsMargins(0, 0, 4, 4)
         bottom_layout.addStretch()
         
-        # 调整大小手柄
         self.resize_handle = QLabel("◢")
-        self.resize_handle.setFixedSize(30, 30)
+        self.resize_handle.setFixedSize(20, 20)
         self.resize_handle.setAlignment(Qt.AlignCenter)
         self.resize_handle.setCursor(Qt.SizeFDiagCursor)
         self.resize_handle.setStyleSheet(f"""
             QLabel {{
-                background-color: {COLORS['bg_mid']};
-                border: 1px solid #444;
-                border-radius: 6px;
                 color: #666;
-                font-size: 20px;
-                font-weight: bold;
+                font-size: 16px;
+                background: transparent;
             }}
-            QLabel:hover {{ background-color: #333; color: #999; }}
+            QLabel:hover {{
+                color: {COLORS['primary']};
+            }}
         """)
+        
         bottom_layout.addWidget(self.resize_handle)
         
-        self.layout.addLayout(bottom_layout)
-
-        self._block_item_click = False
-        self.roots = {}
+        # 组装
+        container_layout = QVBoxLayout(self.container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addLayout(header_layout)
+        container_layout.addWidget(self.tree)
+        container_layout.addLayout(bottom_layout)
         
+        main_layout.addWidget(self.container)
+        
+        # 添加阴影效果 (Translucent 背景下的标配)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        shadow.setOffset(0, 4)
+        self.container.setGraphicsEffect(shadow)
+
+    def _init_tree_structure(self):
         # 定义结构
         order = [
-            ('stars', '⭐  评级'),
-            ('colors', '🎨  颜色'),
-            ('types', '📂  类型'),
-            ('date_create', '📅  创建时间'),
-            ('tags', '🏷️  标签'),
+            ('stars', '评级'),
+            ('colors', '颜色'),
+            ('types', '类型'),
+            ('date_create', '创建时间'),
+            ('tags', '标签'),
         ]
+        
+        # 定义 Header 图标映射 (Icon, Color)
+        header_icons = {
+            'stars': ('star_filled.svg', '#f39c12'),      # 金色
+            'colors': ('palette.svg', '#e91e63'),         # 粉色/调色板
+            'types': ('folder.svg', '#3498db'),           # 蓝色
+            'date_create': ('calendar.svg', '#2ecc71'),   # 绿色
+            'tags': ('tag.svg', '#e67e22')                # 橙色
+        }
         
         font_header = self.tree.font()
         font_header.setBold(True)
@@ -191,216 +193,174 @@ class FilterPanel(QWidget):
         for key, label in order:
             item = QTreeWidgetItem(self.tree)
             item.setText(0, label)
+            # 设置 Header 图标
+            if key in header_icons:
+                icon_name, icon_color = header_icons[key]
+                item.setIcon(0, create_svg_icon(icon_name, icon_color))
+            
             item.setExpanded(True)
             item.setFlags(Qt.ItemIsEnabled) 
             item.setFont(0, font_header)
             item.setForeground(0, Qt.gray)
             self.roots[key] = item
             
+        # 添加具体的子项逻辑 (评级)
+        self._add_fixed_star_options('stars')
+        # 添加时间子项
         self._add_fixed_date_options('date_create')
+
+    def _add_fixed_star_options(self, key):
+        root = self.roots[key]
+        for i in range(5, 0, -1):
+            child = QTreeWidgetItem(root)
+            child.setText(0, "★" * i)
+            child.setData(0, Qt.UserRole, i)
+            child.setCheckState(0, Qt.Unchecked)
 
     def _add_fixed_date_options(self, key):
         root = self.roots[key]
-        options = [("today", "今日"), ("yesterday", "昨日"), ("week", "本周"), ("month", "本月")]
-        for key_val, label in options:
+        options = [
+            ("today", "今日", "today.svg"), 
+            ("yesterday", "昨日", "clock.svg"), 
+            ("week", "本周", "calendar.svg"), 
+            ("month", "本月", "calendar.svg")
+        ]
+        for key_val, label, icon_name in options:
             child = QTreeWidgetItem(root)
             child.setText(0, f"{label} (0)")
             child.setData(0, Qt.UserRole, key_val)
             child.setCheckState(0, Qt.Unchecked)
-
-    def _on_item_changed(self, item, col):
-        if self._block_item_click: return
-        self.filterChanged.emit()
-
-    def _on_item_clicked(self, item, column):
-        if not item:
-            return
-        if item.parent() is None:
-            item.setExpanded(not item.isExpanded())
-        elif item.flags() & Qt.ItemIsUserCheckable:
-            self._block_item_click = True
-            state = item.checkState(0)
-            item.setCheckState(0, Qt.Unchecked if state == Qt.Checked else Qt.Checked)
-            self._block_item_click = False
-            self.filterChanged.emit()
+            child.setIcon(0, create_svg_icon(icon_name, '#888'))
 
     def update_stats(self, stats):
-        self.tree.blockSignals(True)
+        """更新统计数字"""
         self._block_item_click = True
-        
-        star_data = []
-        for i in range(5, 0, -1):
-            c = stats['stars'].get(i, 0)
-            if c > 0: star_data.append((i, "★" * i, c))
-        if stats['stars'].get(0, 0) > 0:
-            star_data.append((0, "无评级", stats['stars'][0]))
-        self._refresh_node('stars', star_data)
+        try:
+            # 更新颜色
+            color_root = self.roots.get('colors')
+            if color_root:
+                color_root.takeChildren()
+                for color_info in stats.get('colors', []):
+                    # color_info: {'color': '#hex', 'count': N}
+                    child = QTreeWidgetItem(color_root)
+                    child.setText(0, f"{color_info['color']} ({color_info['count']})")
+                    child.setData(0, Qt.UserRole, color_info['color'])
+                    child.setCheckState(0, Qt.Unchecked)
+                    # 使用小方块图标
+                    child.setIcon(0, get_color_icon(color_info['color'], 14))
 
-        color_data = []
-        for c_hex, count in stats['colors'].items():
-            if count > 0:
-                color_data.append((c_hex, c_hex, count)) 
-        self._refresh_node('colors', color_data, is_col=True)
-        
-        tag_data = []
-        for name, count in stats.get('tags', []):
-            tag_data.append((name, name, count))
-        self._refresh_node('tags', tag_data)
-        
-        self._update_fixed_node('date_create', stats.get('date_create', {}))
-        
-        type_map = {'text': '文本', 'image': '图片', 'file': '文件'}
-        type_data = []
-        for t, count in stats.get('types', {}).items():
-            if count > 0:
-                type_data.append((t, type_map.get(t, t), count))
-        self._refresh_node('types', type_data)
-        
-        self._block_item_click = False
-        self.tree.blockSignals(False)
-
-    def _refresh_node(self, key, data_list, is_col=False):
-        root = self.roots[key]
-        checked_map = {}
-        for i in range(root.childCount()):
-            child = root.child(i)
-            val = child.data(0, Qt.UserRole)
-            checked_map[val] = child.checkState(0)
+            # 更新类型
+            type_root = self.roots.get('types')
+            if type_root:
+                type_root.takeChildren()
+                for type_info in stats.get('types', []):
+                    # type_info: {'type': 'text', 'count': N}
+                    name = type_info['type'].upper()
+                    child = QTreeWidgetItem(type_root)
+                    child.setText(0, f"{name} ({type_info['count']})")
+                    child.setData(0, Qt.UserRole, type_info['type'])
+                    child.setCheckState(0, Qt.Unchecked)
             
-        root.takeChildren()
-        
-        for value, label, count in data_list:
-            child = QTreeWidgetItem(root)
-            child.setText(0, f"{label} ({count})")
-            child.setData(0, Qt.UserRole, value)
-            child.setCheckState(0, checked_map.get(value, Qt.Unchecked))
-            
-            if is_col:
-                child.setIcon(0, get_color_icon(value))
-                child.setText(0, f" {count}") 
-
-    def _update_fixed_node(self, key, stats_dict):
-        root = self.roots[key]
-        labels = {"today": "今日", "yesterday": "昨日", "week": "本周", "month": "本月"}
-        for i in range(root.childCount()):
-            child = root.child(i)
-            val = child.data(0, Qt.UserRole) 
-            count = stats_dict.get(val, 0)
-            child.setText(0, f"{labels.get(val, val)} ({count})")
+            # 更新标签
+            tag_root = self.roots.get('tags')
+            if tag_root:
+                tag_root.takeChildren()
+                for tag_info in stats.get('tags', []):
+                    # tag_info: {'name': 'xxx', 'count': N}
+                    child = QTreeWidgetItem(tag_root)
+                    child.setText(0, f"{tag_info['name']} ({tag_info['count']})")
+                    child.setData(0, Qt.UserRole, tag_info['name'])
+                    child.setCheckState(0, Qt.Unchecked)
+        finally:
+            self._block_item_click = False
 
     def get_checked_criteria(self):
-        criteria = {}
+        """获取当前所有选中的过滤条件"""
+        filters = {
+            'stars': [],
+            'colors': [],
+            'types': [],
+            'dates': [],
+            'tags': []
+        }
+        
+        # 遍历树
         for key, root in self.roots.items():
-            checked_values = []
             for i in range(root.childCount()):
                 child = root.child(i)
                 if child.checkState(0) == Qt.Checked:
-                    checked_values.append(child.data(0, Qt.UserRole))
-            if checked_values:
-                criteria[key] = checked_values
-        return criteria
+                    val = child.data(0, Qt.UserRole)
+                    if key == 'date_create':
+                        filters['dates'].append(val)
+                    else:
+                        filters[key].append(val)
+        return filters
 
     def reset_filters(self):
-        self.tree.blockSignals(True)
-        for key, root in self.roots.items():
+        """重置所有过滤条件"""
+        self._block_item_click = True
+        for root in self.roots.values():
             for i in range(root.childCount()):
                 root.child(i).setCheckState(0, Qt.Unchecked)
-        self.tree.blockSignals(False)
+        self._block_item_click = False
         self.filterChanged.emit()
-    
-    # --- 拖拽和调整大小逻辑 ---
+
+    def _on_item_changed(self, item, col):
+        if self._block_item_click: return
+        self._last_changed_item = item
+        QTimer.singleShot(100, lambda: setattr(self, '_last_changed_item', None))
+        self.filterChanged.emit()
+
+    def _on_item_clicked(self, item, column):
+        if not item: return
+        if getattr(self, '_last_changed_item', None) == item: return
+        # 点击非根节点切换勾选状态
+        if item.parent():
+            state = Qt.Checked if item.checkState(0) == Qt.Unchecked else Qt.Unchecked
+            item.setCheckState(0, state)
+
+    # --- Resize & Drag Logic ---
     def _get_resize_edge(self, pos):
-        """检测鼠标是否在边缘，返回边缘类型"""
-        rect = self.rect()
-        margin = self.resize_margin
-        
-        # 考虑到外层布局的边距(8px)
-        at_right = (rect.width() - pos.x()) <= margin
-        at_bottom = (rect.height() - pos.y()) <= margin
-        
-        if at_right and at_bottom:
-            return 'corner'
-        elif at_right:
-            return 'right'
-        elif at_bottom:
-            return 'bottom'
+        m = self.resize_margin
+        w, h = self.width(), self.height()
+        if pos.x() > w - m and pos.y() > h - m: return Qt.BottomRightSection
+        if pos.x() > w - m: return Qt.RightSection
+        if pos.y() > h - m: return Qt.BottomSection
         return None
-    
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # 检测是否点击了调整大小手柄
-            handle_global_rect = self.resize_handle.rect()
-            handle_pos = self.resize_handle.mapTo(self, QPoint(0, 0))
-            handle_global_rect.translate(handle_pos)
-            if handle_global_rect.contains(event.pos()):
-                self._resize_edge = 'corner'
-                self._resize_start_pos = event.globalPos()
-                self._resize_start_geometry = self.geometry()
-                self.setCursor(Qt.SizeFDiagCursor)
-                event.accept()
-                return
-            
-            # 检测是否在边缘（用于调整大小）
             edge = self._get_resize_edge(event.pos())
             if edge:
                 self._resize_edge = edge
                 self._resize_start_pos = event.globalPos()
                 self._resize_start_geometry = self.geometry()
-                if edge == 'corner':
-                    self.setCursor(Qt.SizeFDiagCursor)
-                elif edge == 'right':
-                    self.setCursor(Qt.SizeHorCursor)
-                elif edge == 'bottom':
-                    self.setCursor(Qt.SizeVerCursor)
-                event.accept()
-                return
-            
-            # 在标题栏区域才能拖拽
-            header_global_rect = self.header.rect()
-            header_pos = self.header.mapTo(self, QPoint(0, 0))
-            header_global_rect.translate(header_pos)
-            if header_global_rect.contains(event.pos()):
-                self._drag_start_pos = event.pos()
-                self.setCursor(Qt.SizeAllCursor)
-                event.accept()
-                return
-        super().mousePressEvent(event)
+            else:
+                self._drag_start_pos = event.globalPos() - self.pos()
+            event.accept()
 
     def mouseMoveEvent(self, event):
-        # 处理调整大小
-        if self._resize_edge and (event.buttons() & Qt.LeftButton):
-            delta = event.globalPos() - self._resize_start_pos
+        if self._resize_edge:
+            diff = event.globalPos() - self._resize_start_pos
             geo = self._resize_start_geometry
-            
-            new_width = geo.width()
-            new_height = geo.height()
-            
-            if self._resize_edge in ['right', 'corner']:
-                new_width = max(self.minimumWidth(), geo.width() + delta.x())
-            if self._resize_edge in ['bottom', 'corner']:
-                new_height = max(self.minimumHeight(), geo.height() + delta.y())
-            
-            self.resize(new_width, new_height)
-            event.accept()
-            return
-        
-        # 处理拖拽移动
-        if self._drag_start_pos and (event.buttons() & Qt.LeftButton):
+            if self._resize_edge == Qt.RightSection:
+                self.resize(geo.width() + diff.x(), geo.height())
+            elif self._resize_edge == Qt.BottomSection:
+                self.resize(geo.width(), geo.height() + diff.y())
+            elif self._resize_edge == Qt.BottomRightSection:
+                self.resize(geo.width() + diff.x(), geo.height() + diff.y())
+        elif self._drag_start_pos:
             self.move(event.globalPos() - self._drag_start_pos)
-            event.accept()
-            return
-        
-        event.ignore()
+        else:
+            edge = self._get_resize_edge(event.pos())
+            if edge == Qt.BottomRightSection: self.setCursor(Qt.SizeFDiagCursor)
+            elif edge == Qt.RightSection: self.setCursor(Qt.SizeHorCursor)
+            elif edge == Qt.BottomSection: self.setCursor(Qt.SizeVerCursor)
+            else: self.setCursor(Qt.ArrowCursor)
+        event.accept()
 
     def mouseReleaseEvent(self, event):
         self._drag_start_pos = None
         self._resize_edge = None
-        self._resize_start_pos = None
-        self._resize_start_geometry = None
         self.setCursor(Qt.ArrowCursor)
-        
-        # 保存尺寸
-        from core.settings import save_setting
-        save_setting('filter_panel_size', {'width': self.width(), 'height': self.height()})
-        
-        super().mouseReleaseEvent(event)
+        event.accept()

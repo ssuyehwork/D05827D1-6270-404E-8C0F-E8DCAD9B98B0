@@ -77,6 +77,12 @@ class Sidebar(QTreeWidget):
         QTimer.singleShot(10, self.refresh_sync)
 
     def refresh_sync(self):
+        # 【关键修复】保存当前选中项的数据,以便刷新后恢复
+        current_selection = None
+        current_item = self.currentItem()
+        if current_item:
+            current_selection = current_item.data(0, Qt.UserRole)
+        
         self.blockSignals(True)
         try:
             self.clear()
@@ -124,8 +130,25 @@ class Sidebar(QTreeWidget):
             self._add_partition_recursive(partitions_tree, user_partitions_root, counts.get('categories', {}))
             
             self.expandAll()
+            
+            # 【关键修复】恢复之前的选中状态
+            if current_selection:
+                self._restore_selection(current_selection)
+                
         finally:
             self.blockSignals(False)
+    
+    def _restore_selection(self, target_data):
+        """恢复指定数据的选中状态"""
+        from PyQt5.QtWidgets import QTreeWidgetItemIterator
+        iterator = QTreeWidgetItemIterator(self)
+        while iterator.value():
+            item = iterator.value()
+            item_data = item.data(0, Qt.UserRole)
+            if item_data == target_data:
+                self.setCurrentItem(item)
+                return
+            iterator += 1
 
     def _create_color_icon(self, color_str):
         pixmap = QPixmap(14, 14)

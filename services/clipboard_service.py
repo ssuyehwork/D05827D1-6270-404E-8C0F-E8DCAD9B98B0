@@ -37,8 +37,8 @@ class ClipboardService(QObject):
                     self._save_clipboard_item('text', text, category_id=category_id)
                     return
         except Exception as e:
-            # Proper logging should be added here
-            pass
+            import logging
+            logging.error(f"Failed to process MIME data in clipboard service: {e}", exc_info=True)
 
     def _save_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         content_hash = self.hasher.compute(content, data_blob)
