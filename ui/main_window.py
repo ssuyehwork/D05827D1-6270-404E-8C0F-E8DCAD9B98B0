@@ -599,6 +599,14 @@ class MainWindow(QWidget):
 
     def _move_to_category(self, cat_id):
         if self.selected_ids:
+            # 记录最近使用的分类
+            if cat_id is not None:
+                recent_ids = load_setting('recent_categories', [])
+                if cat_id in recent_ids:
+                    recent_ids.remove(cat_id)
+                recent_ids.insert(0, cat_id)
+                save_setting('recent_categories', recent_ids[:20])
+
             for iid in self.selected_ids:
                 self.service.move_category(iid, cat_id)
                 self.card_list_view.remove_card(iid)
@@ -658,7 +666,7 @@ class MainWindow(QWidget):
         if not data: return
         
         menu = QMenu(self)
-        menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_mid']}; color: white; border: 1px solid {COLORS['bg_light']}; border-radius: 6px; padding: 4px; }} QMenu::item {{ padding: 6px 10px 6px 28px; border-radius: 4px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }} QMenu::separator {{ height: 1px; background: {COLORS['bg_light']}; margin: 4px 0px; }} QMenu::icon {{ position: absolute; left: 6px; top: 6px; }}")
+        menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_mid']}; color: white; border: 1px solid {COLORS['bg_light']}; border-radius: 6px; padding: 4px; }} QMenu::item {{ padding: 6px 10px 6px 28px; border-radius: 4px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }} QMenu::separator {{ height: 1px; background: {COLORS['bg_light']}; margin: 4px 0px; }} QMenu::icon {{ position: absolute; left: 8px; top: 7px; }}")
         
         in_trash = (self.curr_filter[0] == 'trash')
         is_locked = data['is_locked']
@@ -687,8 +695,23 @@ class MainWindow(QWidget):
             menu.addAction(create_svg_icon('bookmark.svg', '#ff6b81'), '取消书签' if data['is_favorite'] else '添加书签', self._do_fav)
             menu.addSeparator()
             cat_menu = menu.addMenu(create_svg_icon('branch.svg', '#cccccc'), '移动到分类')
-            cat_menu.addAction('⚠️ 未分类', lambda: self._move_to_category(None))
-            for cat in self.service.get_categories(): cat_menu.addAction(create_svg_icon('branch.svg', cat['color']), f'{cat["name"]}', lambda cid=cat["id"]: self._move_to_category(cid))
+            cat_menu.addAction(create_svg_icon('uncategorized.svg'), '未分类', lambda: self._move_to_category(None))
+            
+            recent_ids = load_setting('recent_categories', [])
+            all_categories_list = self.service.get_categories()
+            
+            if recent_ids:
+                cat_menu.addSeparator()
+                all_categories_map = {cat['id']: cat for cat in all_categories_list}
+                for cat_id in recent_ids:
+                    cat = all_categories_map.get(cat_id)
+                    if cat:
+                        cat_menu.addAction(create_svg_icon('branch.svg', cat['color']), cat['name'], lambda cid=cat['id']: self._move_to_category(cid))
+                cat_menu.addSeparator()
+
+            for cat in all_categories_list:
+                if cat['id'] not in recent_ids:
+                    cat_menu.addAction(create_svg_icon('branch.svg', cat['color']), f'{cat["name"]}', lambda cid=cat["id"]: self._move_to_category(cid))
             menu.addSeparator()
             if not is_locked: menu.addAction(create_svg_icon('action_delete.svg', '#e74c3c'), '移至回收站', self._do_del)
             else: act = menu.addAction(create_svg_icon('action_delete.svg', '#555555'), '移至回收站 (已锁定)'); act.setEnabled(False)
