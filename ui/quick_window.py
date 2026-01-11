@@ -9,14 +9,15 @@ import time
 import datetime
 import subprocess
 import logging
+import math
 
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QListWidget, QLineEdit, 
                              QListWidgetItem, QHBoxLayout, QTreeWidget, QTreeWidgetItem, 
                              QPushButton, QStyle, QAction, QSplitter, QGraphicsDropShadowEffect, 
                              QLabel, QTreeWidgetItemIterator, QShortcut, QAbstractItemView, QMenu,
-                             QColorDialog, QInputDialog, QMessageBox)
+                             QColorDialog, QInputDialog, QMessageBox, QFrame)
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSettings, QUrl, QMimeData, pyqtSignal, QObject, QSize, QByteArray, QBuffer, QIODevice
-from PyQt5.QtGui import QImage, QColor, QCursor, QPixmap, QPainter, QIcon, QKeySequence, QDrag
+from PyQt5.QtGui import QImage, QColor, QCursor, QPixmap, QPainter, QIcon, QKeySequence, QDrag, QIntValidator, QTransform
 
 from services.preview_service import PreviewService
 from ui.dialogs import EditDialog
@@ -74,6 +75,7 @@ except ImportError:
         def get_items(self, **kwargs): return []
         def get_partitions_tree(self): return []
         def get_partition_item_counts(self): return {}
+        def get_ideas_count(self, **kwargs): return 0
     class ClipboardManager(QObject):
         data_captured = pyqtSignal()
         def __init__(self, db_manager):
@@ -111,6 +113,7 @@ class DropTreeWidget(QTreeWidget):
         self.setDropIndicatorShown(True)
 
     def dragEnterEvent(self, event):
+        # 优先允许自身拖拽（排序）
         if event.source() == self:
             super().dragEnterEvent(event)
             event.accept()
@@ -120,35 +123,48 @@ class DropTreeWidget(QTreeWidget):
             event.ignore()
 
     def dragMoveEvent(self, event):
+        # 自身拖拽（排序）：必须调用 super() 且 accept()，否则不显示插入线
         if event.source() == self:
             super().dragMoveEvent(event)
-        elif event.mimeData().hasFormat('application/x-idea-id'):
+            event.accept()
+            return
+            
+        # 外部拖拽（归档笔记）
+        if event.mimeData().hasFormat('application/x-idea-id'):
             item = self.itemAt(event.pos())
             if item:
                 data = item.data(0, Qt.UserRole)
-                if data and data.get('type') in ['partition', 'favorite']:
-                    self.setCurrentItem(item)
-                    event.accept()
-                    return
+                # 只有具备 drop 权限的节点才允许放入
+                if item.flags() & Qt.ItemIsDropEnabled:
+                    # 额外检查：如果是 user root 或者是具体分类
+                    if data and data.get('type') in ['partition', 'favorite', 'trash', 'uncategorized']:
+                        self.setCurrentItem(item)
+                        event.accept()
+                        return
             event.ignore()
         else:
             event.ignore()
 
     def dropEvent(self, event):
+        # 情况1：拖入笔记 -> 归档
         if event.mimeData().hasFormat('application/x-idea-id'):
             try:
                 idea_id = int(event.mimeData().data('application/x-idea-id'))
                 item = self.itemAt(event.pos())
                 if item:
                     data = item.data(0, Qt.UserRole)
-                    if data and data.get('type') in ['partition', 'favorite']:
+                    # 允许拖入各类容器
+                    if data and data.get('type') in ['partition', 'favorite', 'trash', 'uncategorized']:
                         cat_id = data.get('id')
                         self.item_dropped.emit(idea_id, cat_id)
                         event.acceptProposedAction()
             except Exception as e:
                 pass
+        # 情况2：自身拖拽 -> 排序
         elif event.source() == self:
+            # 调用父类完成树节点的移动
             super().dropEvent(event)
+            # 发出信号保存顺序
             self.order_changed.emit()
             event.accept()
 
@@ -163,7 +179,6 @@ QWidget {
     font-family: "Microsoft YaHei", "Segoe UI Emoji";
     font-size: 14px;
 }
-/* 深色 Tooltip 样式 */
 QToolTip {
     color: #ffffff;
     background-color: #2b2b2b;
@@ -189,6 +204,9 @@ QListWidget::item {
     border: none; 
     border-bottom: 1px solid #2A2A2A; 
 }
+QTreeWidget::item {
+    height: 25px;
+}
 QListWidget::item:selected, QTreeWidget::item:selected {
     background-color: #4a90e2; color: #FFFFFF;
 }
@@ -202,19 +220,69 @@ QLineEdit {
     padding: 6px;
     font-size: 16px;
 }
-QPushButton#ToolButton, QPushButton#MinButton, QPushButton#CloseButton, QPushButton#PinButton, QPushButton#MaxButton { 
+
+/* --- 右侧垂直工具栏样式 --- */
+
+/* 垂直工具栏容器 - 黑色背景 */
+QWidget#RightToolbar {
+    background-color: #252526;
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+    border-left: 1px solid #333;
+}
+
+/* 通用图标按钮 - 统一尺寸和悬停 */
+QPushButton#ToolButton, QPushButton#MinButton, QPushButton#CloseButton, QPushButton#PinButton, QPushButton#MaxButton, QPushButton#PageButton { 
     background-color: transparent; 
     border-radius: 4px; 
-    padding: 0px;  
-    font-size: 16px;
-    font-weight: bold;
-    text-align: center;
+    padding: 0px;
+    border: none;
+    margin: 0px; /* 消除外边距 */
 }
-QPushButton#ToolButton:hover, QPushButton#MinButton:hover, QPushButton#MaxButton:hover { background-color: #444; }
-QPushButton#ToolButton:checked, QPushButton#MaxButton:checked { background-color: #555; border: 1px solid #666; }
-QPushButton#CloseButton:hover { background-color: #E81123; color: white; }
-QPushButton#PinButton:hover { background-color: #444; }
-QPushButton#PinButton:checked { background-color: #0078D4; color: white; border: 1px solid #005A9E; }
+QPushButton#ToolButton:hover, QPushButton#MinButton:hover, QPushButton#MaxButton:hover, QPushButton#PageButton:hover, QPushButton#PinButton:hover { 
+    background-color: rgba(255, 255, 255, 0.1); 
+}
+QPushButton#CloseButton:hover { 
+    background-color: #E81123; 
+}
+/* 选中状态 */
+QPushButton#PinButton:checked, QPushButton#ToolButton:checked { 
+    background-color: #4a90e2; 
+    border: 1px solid #357abd; 
+}
+
+/* 页码输入框 - 极简风格 */
+QLineEdit#PageInput {
+    background: transparent;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #ddd;
+    font-size: 11px;
+    font-weight: bold;
+    selection-background-color: #4a90e2;
+    padding: 0px;
+}
+QLineEdit#PageInput:focus {
+    border-color: #4a90e2;
+}
+
+/* 总页数标签 */
+QLabel#TotalPageLabel {
+    background: transparent;
+    border: none;
+    color: #777;
+    font-size: 10px;
+}
+
+/* 垂直标题文字 */
+QLabel#VerticalTitle {
+    color: #666;
+    font-weight: bold;
+    font-size: 14px;
+    font-family: "Microsoft YaHei";
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
 
 QScrollBar:vertical { border: none; background: transparent; width: 6px; margin: 0px; }
 QScrollBar::handle:vertical { background: #444; border-radius: 3px; min-height: 20px; }
@@ -243,7 +311,11 @@ class QuickWindow(QWidget):
         self.resize_area = None
         self._is_pinned = False
         
-        # [优化] 图标 HTML 缓存，避免重复 Base64 编码
+        # [分页] 初始化状态
+        self.current_page = 1
+        self.page_size = 100
+        self.total_pages = 1
+        
         self._icon_html_cache = {}
         
         self.last_active_hwnd = None
@@ -282,11 +354,22 @@ class QuickWindow(QWidget):
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_list_context_menu)
         
+        # 修复关键：连接信号
         self.partition_tree.currentItemChanged.connect(self._on_partition_selection_changed)
         self.partition_tree.item_dropped.connect(self._handle_category_drop)
         self.partition_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.partition_tree.customContextMenuRequested.connect(self._show_partition_context_menu)
         self.partition_tree.order_changed.connect(self._save_partition_order)
+        
+        self.system_tree.currentItemChanged.connect(self._on_system_selection_changed)
+        self.system_tree.item_dropped.connect(self._handle_category_drop)
+        self.system_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.system_tree.customContextMenuRequested.connect(self._show_partition_context_menu)
+
+        # 翻页按钮连接
+        self.btn_prev_page.clicked.connect(self._prev_page)
+        self.btn_next_page.clicked.connect(self._next_page)
+        self.txt_page_input.returnPressed.connect(self._jump_to_page)
         
         self.btn_stay_top.clicked.connect(self._toggle_stay_on_top)
         self.btn_toggle_side.clicked.connect(self._toggle_partition_panel)
@@ -296,7 +379,23 @@ class QuickWindow(QWidget):
         
         self._update_partition_tree()
         self._update_list()
-        self.partition_tree.currentItemChanged.connect(self._update_partition_status_display)
+        self._update_partition_status_display()
+
+    def on_clipboard_changed(self):
+        if self._processing_clipboard: return
+        self._processing_clipboard = True
+        try:
+            mime = self.clipboard.mimeData()
+            self.cm.process_clipboard(mime, None)
+        finally: 
+            self._processing_clipboard = False
+
+    def _create_rotated_icon(self, icon_name, color, angle):
+        icon = create_svg_icon(icon_name, color)
+        pixmap = icon.pixmap(24, 24)
+        transform = QTransform().rotate(angle)
+        rotated_pixmap = pixmap.transformed(transform, Qt.SmoothTransformation)
+        return QIcon(rotated_pixmap)
 
     def _init_ui(self):
         self.setWindowTitle("快速笔记")
@@ -304,8 +403,9 @@ class QuickWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         
-        self.root_layout = QVBoxLayout(self)
+        self.root_layout = QHBoxLayout(self)
         self.root_layout.setContentsMargins(15, 15, 15, 15) 
+        self.root_layout.setSpacing(0)
         
         self.container = QWidget()
         self.container.setObjectName("Container")
@@ -320,93 +420,26 @@ class QuickWindow(QWidget):
         
         self.setStyleSheet(DARK_STYLESHEET)
         
-        self.main_layout = QVBoxLayout(self.container)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
-        self.main_layout.setSpacing(10)
-        
-        title_bar_layout = QHBoxLayout()
-        title_bar_layout.setContentsMargins(0, 0, 0, 0)
-        # 【修改 1】将间距设为 0，极致紧凑
-        title_bar_layout.setSpacing(0)
-        
-        title_icon = QLabel()
-        title_icon.setPixmap(create_svg_icon("zap.svg", COLORS['primary']).pixmap(16, 16))
-        title_bar_layout.addWidget(title_icon)
-        
-        # 【修改 2】由于间距为0，给标题左侧单独加点间隙
-        title_bar_layout.addSpacing(8)
-        
-        self.title_label = QLabel("快速笔记")
-        self.title_label.setObjectName("TitleLabel")
-        title_bar_layout.addWidget(self.title_label)
-        
-        title_bar_layout.addStretch()
-        
-        # 【修改 3】极致紧凑尺寸 24x24
-        btn_size = 24
-        
-        self.btn_stay_top = QPushButton(self)
-        self.btn_stay_top.setIcon(create_svg_icon('pin_tilted.svg', '#aaa'))
-        self.btn_stay_top.setObjectName("PinButton")
-        self.btn_stay_top.setToolTip("保持置顶")
-        self.btn_stay_top.setCheckable(True)
-        self.btn_stay_top.setFixedSize(btn_size, btn_size)
-        
-        self.btn_toggle_side = QPushButton(self)
-        self.btn_toggle_side.setIcon(create_svg_icon('action_eye.svg', '#aaa'))
-        self.btn_toggle_side.setObjectName("ToolButton")
-        self.btn_toggle_side.setToolTip("显示/隐藏侧边栏")
-        self.btn_toggle_side.setFixedSize(btn_size, btn_size)
-        
-        self.btn_open_full = QPushButton(self)
-        self.btn_open_full.setIcon(create_svg_icon('win_max.svg', '#aaa'))
-        self.btn_open_full.setObjectName("MaxButton")
-        self.btn_open_full.setToolTip("切换主程序界面")
-        self.btn_open_full.setFixedSize(btn_size, btn_size)
-        
-        self.btn_minimize = QPushButton(self)
-        self.btn_minimize.setIcon(create_svg_icon('win_min.svg', '#aaa'))
-        self.btn_minimize.setObjectName("MinButton")
-        self.btn_minimize.setToolTip("最小化")
-        self.btn_minimize.setFixedSize(btn_size, btn_size)
-        
-        self.btn_close = QPushButton(self)
-        self.btn_close.setIcon(create_svg_icon('win_close.svg', '#aaa'))
-        self.btn_close.setObjectName("CloseButton")
-        self.btn_close.setToolTip("关闭")
-        self.btn_close.setFixedSize(btn_size, btn_size)
-        
-        title_bar_layout.addWidget(self.btn_stay_top)
-        title_bar_layout.addWidget(self.btn_toggle_side)
-        title_bar_layout.addWidget(self.btn_open_full) 
-        title_bar_layout.addWidget(self.btn_minimize)
-        title_bar_layout.addWidget(self.btn_close)
-        
-        self.main_layout.addLayout(title_bar_layout)
-        
+        self.main_container_layout = QHBoxLayout(self.container)
+        self.main_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_container_layout.setSpacing(0)
+
+        # === 左侧内容区 ===
+        self.left_content_widget = QWidget()
+        self.left_layout = QVBoxLayout(self.left_content_widget)
+        self.left_layout.setContentsMargins(10, 10, 10, 5) 
+        self.left_layout.setSpacing(8)
+
         self.search_box = SearchLineEdit(self)
         self.search_box.setPlaceholderText("搜索灵感 (双击查看历史)")
         self.search_box.setClearButtonEnabled(True)
-
         _clear_icon_path = create_clear_button_icon()
         clear_button_style = f"""
-        QLineEdit::clear-button {{
-            image: url({_clear_icon_path});
-            border: 0;
-            margin-right: 5px;
-        }}
-        QLineEdit::clear-button:hover {{
-            background-color: #444;
-            border-radius: 8px;
-        }}
+        QLineEdit::clear-button {{ image: url({_clear_icon_path}); border: 0; margin-right: 5px; }}
+        QLineEdit::clear-button:hover {{ background-color: #444; border-radius: 8px; }}
         """
         self.search_box.setStyleSheet(self.search_box.styleSheet() + clear_button_style)
-
-        self.main_layout.addWidget(self.search_box)
-        
-        content_widget = QWidget()
-        content_layout = QHBoxLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        self.left_layout.addWidget(self.search_box)
         
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setHandleWidth(4)
@@ -418,26 +451,141 @@ class QuickWindow(QWidget):
         self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_widget.setIconSize(QSize(28, 28))
         
+        self.right_sidebar_widget = QWidget()
+        self.right_sidebar_layout = QVBoxLayout(self.right_sidebar_widget)
+        self.right_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_sidebar_layout.setSpacing(0)
+        
+        self.system_tree = DropTreeWidget()
+        self.system_tree.setHeaderHidden(True)
+        self.system_tree.setFocusPolicy(Qt.NoFocus)
+        self.system_tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.system_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.system_tree.setFixedHeight(150) 
+        
         self.partition_tree = DropTreeWidget()
         self.partition_tree.setHeaderHidden(True)
         self.partition_tree.setFocusPolicy(Qt.NoFocus)
         self.partition_tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.partition_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
+        self.right_sidebar_layout.addWidget(self.system_tree)
+        self.right_sidebar_layout.addWidget(self.partition_tree)
+        
         self.splitter.addWidget(self.list_widget)
-        self.splitter.addWidget(self.partition_tree)
+        self.splitter.addWidget(self.right_sidebar_widget)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
         self.splitter.setSizes([550, 150])
         
-        content_layout.addWidget(self.splitter)
-        self.main_layout.addWidget(content_widget, 1)
+        self.left_layout.addWidget(self.splitter)
         
         self.partition_status_label = QLabel("当前分区: 全部数据")
         self.partition_status_label.setObjectName("PartitionStatusLabel")
-        self.partition_status_label.setStyleSheet("font-size: 11px; color: #888; padding-left: 5px;")
-        self.main_layout.addWidget(self.partition_status_label)
+        self.partition_status_label.setStyleSheet("font-size: 11px; color: #888; padding-left: 2px;")
+        self.left_layout.addWidget(self.partition_status_label)
         self.partition_status_label.hide()
+
+        self.main_container_layout.addWidget(self.left_content_widget)
+
+        # === 右侧垂直工具栏 ===
+        self.right_bar = QWidget()
+        self.right_bar.setObjectName("RightToolbar")
+        self.right_bar.setFixedWidth(40) 
+        
+        self.right_bar_layout = QVBoxLayout(self.right_bar)
+        self.right_bar_layout.setContentsMargins(0, 8, 0, 8)
+        self.right_bar_layout.setSpacing(0)
+        self.right_bar_layout.setAlignment(Qt.AlignHCenter)
+
+        btn_size = 28
+
+        # 1. 窗口控制
+        self.btn_close = QPushButton()
+        self.btn_close.setIcon(create_svg_icon('win_close.svg', '#aaa'))
+        self.btn_close.setObjectName("CloseButton")
+        self.btn_close.setToolTip("关闭")
+        self.btn_close.setFixedSize(btn_size, btn_size)
+        self.right_bar_layout.addWidget(self.btn_close)
+
+        self.btn_open_full = QPushButton()
+        self.btn_open_full.setIcon(create_svg_icon('win_max.svg', '#aaa'))
+        self.btn_open_full.setObjectName("MaxButton")
+        self.btn_open_full.setToolTip("切换主程序界面")
+        self.btn_open_full.setFixedSize(btn_size, btn_size)
+        self.right_bar_layout.addWidget(self.btn_open_full)
+
+        self.btn_minimize = QPushButton()
+        self.btn_minimize.setIcon(create_svg_icon('win_min.svg', '#aaa'))
+        self.btn_minimize.setObjectName("MinButton")
+        self.btn_minimize.setToolTip("最小化")
+        self.btn_minimize.setFixedSize(btn_size, btn_size)
+        self.right_bar_layout.addWidget(self.btn_minimize)
+        
+        # 2. 功能按钮
+        self.btn_stay_top = QPushButton()
+        self.btn_stay_top.setIcon(create_svg_icon('pin_tilted.svg', '#aaa'))
+        self.btn_stay_top.setObjectName("PinButton")
+        self.btn_stay_top.setToolTip("保持置顶")
+        self.btn_stay_top.setCheckable(True)
+        self.btn_stay_top.setFixedSize(btn_size, btn_size)
+        self.right_bar_layout.addWidget(self.btn_stay_top)
+
+        self.btn_toggle_side = QPushButton()
+        self.btn_toggle_side.setIcon(create_svg_icon('action_eye.svg', '#aaa'))
+        self.btn_toggle_side.setObjectName("ToolButton")
+        self.btn_toggle_side.setToolTip("显示/隐藏侧边栏")
+        self.btn_toggle_side.setFixedSize(btn_size, btn_size)
+        self.right_bar_layout.addWidget(self.btn_toggle_side)
+
+        self.right_bar_layout.addSpacing(10)
+
+        # 3. 翻页区域
+        self.btn_prev_page = QPushButton()
+        self.btn_prev_page.setObjectName("PageButton")
+        self.btn_prev_page.setIcon(self._create_rotated_icon("nav_prev.svg", "#aaa", 90))
+        self.btn_prev_page.setFixedSize(btn_size, btn_size)
+        self.btn_prev_page.setToolTip("上一页")
+        self.btn_prev_page.setCursor(Qt.PointingHandCursor)
+        self.right_bar_layout.addWidget(self.btn_prev_page)
+
+        self.txt_page_input = QLineEdit("1")
+        self.txt_page_input.setObjectName("PageInput")
+        self.txt_page_input.setAlignment(Qt.AlignCenter)
+        self.txt_page_input.setFixedWidth(28)
+        self.txt_page_input.setValidator(QIntValidator(1, 9999))
+        self.right_bar_layout.addWidget(self.txt_page_input)
+        
+        self.lbl_total_pages = QLabel("1")
+        self.lbl_total_pages.setObjectName("TotalPageLabel")
+        self.lbl_total_pages.setAlignment(Qt.AlignCenter)
+        self.right_bar_layout.addWidget(self.lbl_total_pages)
+
+        self.btn_next_page = QPushButton()
+        self.btn_next_page.setObjectName("PageButton")
+        self.btn_next_page.setIcon(self._create_rotated_icon("nav_next.svg", "#aaa", 90))
+        self.btn_next_page.setFixedSize(btn_size, btn_size)
+        self.btn_next_page.setToolTip("下一页")
+        self.btn_next_page.setCursor(Qt.PointingHandCursor)
+        self.right_bar_layout.addWidget(self.btn_next_page)
+
+        self.right_bar_layout.addStretch()
+
+        # 4. 垂直标题
+        self.lbl_vertical_title = QLabel("快\n速\n笔\n记")
+        self.lbl_vertical_title.setObjectName("VerticalTitle")
+        self.lbl_vertical_title.setAlignment(Qt.AlignCenter)
+        self.right_bar_layout.addWidget(self.lbl_vertical_title)
+
+        self.right_bar_layout.addStretch()
+
+        # 5. Logo
+        title_icon = QLabel()
+        title_icon.setPixmap(create_svg_icon("zap.svg", COLORS['primary']).pixmap(20, 20))
+        title_icon.setAlignment(Qt.AlignCenter)
+        self.right_bar_layout.addWidget(title_icon)
+        
+        self.main_container_layout.addWidget(self.right_bar)
 
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Ctrl+F"), self, self.search_box.setFocus)
@@ -698,7 +846,7 @@ class QuickWindow(QWidget):
                 data = item.data(0, Qt.UserRole)
                 if data and data.get('type') == 'partition':
                     cat_id = data.get('id')
-                    update_list.append((cat_id, parent_id, i))
+                    update_list.append({'id': cat_id, 'parent_id': parent_id, 'sort_order': i})
                     if item.childCount() > 0: iterate_items(item, cat_id)
         iterate_items(self.partition_tree.invisibleRootItem(), None)
         if update_list: self.db.save_category_order(update_list)
@@ -719,7 +867,7 @@ class QuickWindow(QWidget):
             except: pass
             
         is_hidden = load_setting("partition_panel_hidden", False)
-        self.partition_tree.setHidden(is_hidden)
+        self.right_sidebar_widget.setHidden(is_hidden) # 修改为隐藏整个右侧容器
         self._update_partition_status_display()
         
         is_pinned = load_setting("quick_window_pinned", False)
@@ -729,7 +877,7 @@ class QuickWindow(QWidget):
     def save_state(self):
         save_setting("quick_window_geometry_hex", self.saveGeometry().toHex().data().decode())
         save_setting("quick_window_splitter_hex", self.splitter.saveState().toHex().data().decode())
-        save_setting("partition_panel_hidden", self.partition_tree.isHidden())
+        save_setting("partition_panel_hidden", self.right_sidebar_widget.isHidden())
         save_setting("quick_window_pinned", self.btn_stay_top.isChecked())
 
     def closeEvent(self, event):
@@ -738,12 +886,25 @@ class QuickWindow(QWidget):
         event.ignore()
 
     def _get_resize_area(self, pos):
-        x, y = pos.x(), pos.y(); w, h = self.width(), self.height(); m = self.RESIZE_MARGIN
+        # 修正：工具栏在右侧，调整区域需要避开
+        rect = self.rect()
+        right_margin = 40 # 工具栏宽度
+        
+        x, y = pos.x(), pos.y()
+        w, h = rect.width(), rect.height()
+        m = self.RESIZE_MARGIN
+        
         areas = []
         if x < m: areas.append('left')
-        elif x > w - m: areas.append('right')
+        elif x > w - m: areas.append('right') # 注意：这可能会和工具栏点击冲突，通常工具栏应处理自己的事件
+        
         if y < m: areas.append('top')
         elif y > h - m: areas.append('bottom')
+        
+        # 如果点击在右侧工具栏区域内，且不是边缘拖拽，则返回空
+        if x > w - right_margin and y > m and y < h - m:
+            return []
+            
         return areas
 
     def _set_cursor_shape(self, areas):
@@ -809,28 +970,154 @@ class QuickWindow(QWidget):
             self.last_thread_id = user32.GetWindowThreadProcessId(current_hwnd, None)
             self.last_focus_hwnd = None 
 
-    def _on_search_text_changed(self): self.search_timer.start(300)
+    def _on_search_text_changed(self):
+        # 搜索变更时，重置为第一页
+        self.current_page = 1
+        self.search_timer.start(300)
+
+    # [新增] 翻页控制槽函数
+    def _prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self._update_list()
+
+    def _next_page(self):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self._update_list()
+
+    # [新增] 页码跳转逻辑
+    def _jump_to_page(self):
+        text = self.txt_page_input.text()
+        if text.isdigit():
+            page = int(text)
+            if 1 <= page <= self.total_pages:
+                self.current_page = page
+                self._update_list()
+            else:
+                self.txt_page_input.setText(str(self.current_page))
+        else:
+            self.txt_page_input.setText(str(self.current_page))
+
+    # [核心修改] 动态主题：奇/偶行都使用分类颜色，只是深浅不同
+    def _apply_list_theme(self, color_hex):
+        if color_hex:
+            c = QColor(color_hex)
+            
+            # 偶数行（Base Background）：分类颜色的深色版 (350% darker)
+            bg_color = c.darker(350).name()
+            
+            # 奇数行（Alternate Background）：分类颜色的更深色版 (450% darker) -> 也就是"调暗一点"
+            alt_bg_color = c.darker(450).name()
+            
+            # 选中行：分类颜色的稍亮版 (110% darker，接近原色)
+            sel_color = c.darker(110).name()
+
+            style = f"""
+                QListWidget {{
+                    border: none;
+                    outline: none;
+                    /* 偶数行背景 */
+                    background-color: {bg_color};
+                    /* 奇数行背景 (交替色) - 更暗一点 */
+                    alternate-background-color: {alt_bg_color};
+                }}
+                QListWidget::item {{
+                    padding: 6px;
+                    border: none;
+                    border-bottom: 1px solid rgba(0,0,0, 0.3); /* 增加微弱的分割线提升层次感 */
+                }}
+                QListWidget::item:selected {{
+                    background-color: {sel_color};
+                    color: #FFFFFF;
+                }}
+                QListWidget::item:hover {{
+                    background-color: rgba(255, 255, 255, 0.1);
+                }}
+            """
+        else:
+            # 默认深色主题 (未选中分类时)
+            style = """
+                QListWidget {
+                    border: none;
+                    outline: none;
+                    background-color: #1e1e1e;
+                    alternate-background-color: #151515;
+                }
+                QListWidget::item {
+                    padding: 6px;
+                    border: none;
+                    border-bottom: 1px solid #2A2A2A;
+                }
+                QListWidget::item:selected {
+                    background-color: #4a90e2;
+                    color: #FFFFFF;
+                }
+                QListWidget::item:hover {
+                    background-color: #333333;
+                }
+            """
+        self.list_widget.setStyleSheet(style)
 
     def _update_list(self):
         search_text = self.search_box.text()
-        current_partition = self.partition_tree.currentItem()
-        f_type, f_val = 'all', None
         
-        if current_partition:
-            partition_data = current_partition.data(0, Qt.UserRole)
+        # [双树逻辑] 检查谁被选中了
+        current_partition_sys = self.system_tree.currentItem()
+        current_partition_user = self.partition_tree.currentItem()
+        
+        f_type, f_val = 'all', None
+        current_color = None
+        
+        # 优先判断是否有选中项
+        active_item = None
+        
+        # [双树逻辑修复] 只要有 currentItem 且不为 None，就认为是激活项
+        if current_partition_sys:
+            active_item = current_partition_sys
+        elif current_partition_user:
+            active_item = current_partition_user
+        
+        if active_item:
+            partition_data = active_item.data(0, Qt.UserRole)
             if partition_data:
                 p_type = partition_data.get('type')
-                
                 if p_type == 'partition': 
                     f_type, f_val = 'category', partition_data.get('id')
+                    current_color = partition_data.get('color') 
                 elif p_type == 'uncategorized':
                     f_type, f_val = 'category', None
                 elif p_type in ['all', 'today', 'untagged', 'bookmark', 'trash']: 
                     f_type, f_val = p_type, None
 
-        limit = 100
+        # [新增] 应用动态列表颜色
+        self._apply_list_theme(current_color)
+
+        total_items = self.db.get_ideas_count(search=search_text, f_type=f_type, f_val=f_val)
         
-        items = self.db.get_ideas(search=search_text, f_type=f_type, f_val=f_val, page=1, page_size=limit)
+        if total_items > 0:
+            self.total_pages = math.ceil(total_items / self.page_size)
+        else:
+            self.total_pages = 1
+            
+        if self.current_page > self.total_pages:
+            self.current_page = self.total_pages
+        if self.current_page < 1:
+            self.current_page = 1
+            
+        self.txt_page_input.setText(str(self.current_page))
+        self.lbl_total_pages.setText(f"{self.total_pages}") # [修改] 移除 "/"
+        
+        self.btn_prev_page.setDisabled(self.current_page <= 1)
+        self.btn_next_page.setDisabled(self.current_page >= self.total_pages)
+
+        items = self.db.get_ideas(
+            search=search_text, 
+            f_type=f_type, 
+            f_val=f_val, 
+            page=self.current_page, 
+            page_size=self.page_size
+        )
         
         self.list_widget.clear()
         
@@ -861,6 +1148,32 @@ class QuickWindow(QWidget):
             
         if self.list_widget.count() > 0:
             self.list_widget.setCurrentRow(0)
+
+    # [双树逻辑修复] 强制清除另一个树的 currentItem，确保下次点击能触发 changed 信号
+    def _on_system_selection_changed(self, current, previous):
+        if current:
+            # 清除下方分区的选中
+            self.partition_tree.blockSignals(True)
+            self.partition_tree.clearSelection()
+            self.partition_tree.setCurrentItem(None) # [核心修复] 强制置空
+            self.partition_tree.blockSignals(False)
+            
+            self.current_page = 1
+            self._update_list()
+            self._update_partition_status_display()
+
+    # [双树逻辑修复] 强制清除另一个树的 currentItem，确保下次点击能触发 changed 信号
+    def _on_partition_selection_changed(self, current, previous):
+        if current:
+            # 清除上方系统项的选中
+            self.system_tree.blockSignals(True)
+            self.system_tree.clearSelection()
+            self.system_tree.setCurrentItem(None) # [核心修复] 强制置空
+            self.system_tree.blockSignals(False)
+            
+            self.current_page = 1
+            self._update_list()
+            self._update_partition_status_display()
 
     def _get_icon_html(self, icon_name, color):
         cache_key = (icon_name, color)
@@ -957,21 +1270,52 @@ class QuickWindow(QWidget):
         return QIcon(pixmap)
 
     def _update_partition_tree(self):
-        current_selection_data = None
-        if self.partition_tree.currentItem(): current_selection_data = self.partition_tree.currentItem().data(0, Qt.UserRole)
+        # [双树逻辑] 分别更新上下两棵树
         
-        self.partition_tree.clear()
-        counts = self.db.get_counts(); partition_counts = counts.get('categories', {})
-        static_items = [("全部数据", 'all', 'all_data.svg'), ("今日数据", 'today', 'today.svg'), ("未分类", 'uncategorized', 'uncategorized.svg'), ("未标签", 'untagged', 'untagged.svg'), ("书签", 'bookmark', 'bookmark.svg'), ("回收站", 'trash', 'trash.svg')]
-        id_map = {'all': -1, 'today': -5, 'uncategorized': -15, 'untagged': -16, 'bookmark': -20, 'trash': -30}
+        # 1. 更新上部系统树
+        self.system_tree.clear()
+        counts = self.db.get_counts()
+        
+        static_items = [
+            ("全部数据", 'all', 'all_data.svg'), 
+            ("今日数据", 'today', 'today.svg'), 
+            ("未分类", 'uncategorized', 'uncategorized.svg'), 
+            ("未标签", 'untagged', 'untagged.svg'), 
+            ("书签", 'bookmark', 'bookmark.svg'), 
+            ("回收站", 'trash', 'trash.svg')
+        ]
         
         for name, key, icon_filename in static_items:
-            data = {'type': key, 'id': id_map.get(key)}
-            item = QTreeWidgetItem(self.partition_tree, [f"{name} ({counts.get(key, 0)})"])
+            data = {'type': key, 'id': None} # ID for system items is None usually
+            # 修正 uncategorized 等的 ID 映射
+            id_map = {'all': -1, 'today': -5, 'uncategorized': -15, 'untagged': -16, 'bookmark': -20, 'trash': -30}
+            if key in id_map: data['id'] = id_map[key]
+            
+            item = QTreeWidgetItem(self.system_tree, [f"{name} ({counts.get(key, 0)})"])
             item.setData(0, Qt.UserRole, data)
             item.setIcon(0, create_svg_icon(icon_filename))
+            item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled) # 禁止系统项拖拽，但允许Drop
+            item.setFlags(item.flags() | Qt.ItemIsDropEnabled) # 允许拖入
+
+        # 默认选中“全部数据”
+        if self.system_tree.topLevelItemCount() > 0 and not self.partition_tree.currentItem():
+            self.system_tree.setCurrentItem(self.system_tree.topLevelItem(0))
+
+        # 2. 更新下部分区树
+        current_selection_data = None
+        if self.partition_tree.currentItem(): 
+            current_selection_data = self.partition_tree.currentItem().data(0, Qt.UserRole)
+        
+        self.partition_tree.clear()
+        partition_counts = counts.get('categories', {})
+        
+        user_partitions_root = QTreeWidgetItem(self.partition_tree, ["我的分区"])
+        user_partitions_root.setIcon(0, create_svg_icon("branch.svg", "white"))
+        user_partitions_root.setFlags(Qt.ItemIsEnabled | Qt.ItemIsDropEnabled) # 仅允许Drop
+        font = user_partitions_root.font(0); font.setBold(True); user_partitions_root.setFont(0, font)
+        user_partitions_root.setForeground(0, QColor("#FFFFFF"))
             
-        self._add_partition_recursive(self.db.get_partitions_tree(), self.partition_tree, partition_counts)
+        self._add_partition_recursive(self.db.get_partitions_tree(), user_partitions_root, partition_counts)
         self.partition_tree.expandAll()
         
         if current_selection_data:
@@ -981,8 +1325,6 @@ class QuickWindow(QWidget):
                 if item_data and item_data.get('id') == current_selection_data.get('id') and item_data.get('type') == current_selection_data.get('type'):
                     self.partition_tree.setCurrentItem(item); break
                 it += 1
-        else:
-            if self.partition_tree.topLevelItemCount() > 0: self.partition_tree.setCurrentItem(self.partition_tree.topLevelItem(0))
 
     def _add_partition_recursive(self, partitions, parent_item, partition_counts):
         for partition in partitions:
@@ -990,21 +1332,28 @@ class QuickWindow(QWidget):
             item = QTreeWidgetItem(parent_item, [f"{partition.name} ({count})"])
             item.setData(0, Qt.UserRole, {'type': 'partition', 'id': partition.id, 'color': partition.color})
             item.setIcon(0, self._create_color_icon(partition.color))
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
             if partition.children: self._add_partition_recursive(partition.children, item, partition_counts)
 
     def _update_partition_status_display(self):
-        if self.partition_tree.isHidden():
-            current_item = self.partition_tree.currentItem()
-            text = current_item.text(0).split(' (')[0] if current_item else "N/A"
+        # [修改] 检查整个右侧容器的可见性
+        if self.right_sidebar_widget.isHidden():
+            current_sys = self.system_tree.currentItem()
+            current_user = self.partition_tree.currentItem()
+            
+            text = "N/A"
+            if current_sys:
+                text = current_sys.text(0).split(' (')[0]
+            elif current_user:
+                text = current_user.text(0).split(' (')[0]
+                
             self.partition_status_label.setText(f"当前分区: {text}")
             self.partition_status_label.show()
         else: self.partition_status_label.hide()
-
-    def _on_partition_selection_changed(self, c, p): self._update_list(); self._update_partition_status_display()
         
     def _toggle_partition_panel(self):
-        is_visible = self.partition_tree.isVisible()
-        self.partition_tree.setVisible(not is_visible)
+        is_visible = self.right_sidebar_widget.isVisible()
+        self.right_sidebar_widget.setVisible(not is_visible)
         self.settings.setValue("partition_panel_hidden", not is_visible)
         self._update_partition_status_display()
     
@@ -1052,30 +1401,47 @@ class QuickWindow(QWidget):
         finally:
             if attached: user32.AttachThreadInput(curr_thread, target_thread, False)
 
-    def on_clipboard_changed(self):
-        if self._processing_clipboard: return
-        self._processing_clipboard = True
-        try:
-            mime = self.clipboard.mimeData()
-            self.cm.process_clipboard(mime, None)
-        finally: self._processing_clipboard = False
+    def _draw_book_mocha(self, p):
+        w, h = 56, 76
+        p.setBrush(QColor(245, 240, 225)); p.drawRoundedRect(QRectF(-w/2+6, -h/2+6, w, h), 3, 3)
+        grad = QLinearGradient(-w, -h, w, h)
+        grad.setColorAt(0, QColor(90, 60, 50)); grad.setColorAt(1, QColor(50, 30, 25))
+        p.setBrush(grad); p.drawRoundedRect(QRectF(-w/2, -h/2, w, h), 3, 3)
+        p.setBrush(QColor(120, 20, 30)); p.drawRect(QRectF(w/2 - 15, -h/2, 8, h))
 
-    def keyPressEvent(self, event):
-        key = event.key()
-        if key == Qt.Key_Escape: self.close()
-        elif key in (Qt.Key_Up, Qt.Key_Down):
-            if not self.list_widget.hasFocus(): self.list_widget.setFocus(); QApplication.sendEvent(self.list_widget, event)
-        else: super().keyPressEvent(event)
+    def _draw_universal_pen(self, p):
+        w_pen, h_pen = 12, 46
+        c_light, c_mid, c_dark = QColor(180, 60, 70), QColor(140, 20, 30), QColor(60, 5, 10)
+        body_grad = QLinearGradient(-w_pen/2, 0, w_pen/2, 0)
+        body_grad.setColorAt(0.0, c_light); body_grad.setColorAt(0.5, c_mid); body_grad.setColorAt(1.0, c_dark)
+        path_body = QPainterPath()
+        path_body.addRoundedRect(QRectF(-w_pen/2, -h_pen/2, w_pen, h_pen), 5, 5)
+        p.setPen(Qt.NoPen); p.setBrush(body_grad); p.drawPath(path_body)
+        path_tip = QPainterPath(); tip_h = 14
+        path_tip.moveTo(-w_pen/2 + 3, h_pen/2); path_tip.lineTo(w_pen/2 - 3, h_pen/2); path_tip.lineTo(0, h_pen/2 + tip_h); path_tip.closeSubpath()
+        tip_grad = QLinearGradient(-5, 0, 5, 0)
+        tip_grad.setColorAt(0, QColor(240, 230, 180)); tip_grad.setColorAt(1, QColor(190, 170, 100))
+        p.setBrush(tip_grad); p.drawPath(path_tip)
+        p.setBrush(QColor(220, 200, 140)); p.drawRect(QRectF(-w_pen/2, h_pen/2 - 4, w_pen, 4))
+        p.setBrush(QColor(210, 190, 130)); p.drawRoundedRect(QRectF(-1.5, -h_pen/2 + 6, 3, 24), 1.5, 1.5)
 
+    # [已补全] 右键菜单功能
     def _show_partition_context_menu(self, pos):
         import logging
         try:
-            item = self.partition_tree.itemAt(pos)
+            # 判断点击的是哪个 TreeWidget
+            sender = self.sender()
+            if not sender: return
+            
+            item = sender.itemAt(pos)
             menu = QMenu(self)
             menu.setStyleSheet(f"background-color: {COLORS.get('bg_dark', '#2d2d2d')}; color: white; border: 1px solid #444;")
             
-            if not item:
-                menu.addAction('➕ 新建分组', self._new_group); menu.exec_(self.partition_tree.mapToGlobal(pos)); return
+            # 点击的是“我的分区”根节点或空白处 -> 允许新建
+            if not item or item.text(0) == "我的分区":
+                menu.addAction('➕ 新建分组', self._new_group)
+                menu.exec_(sender.mapToGlobal(pos))
+                return
                 
             data = item.data(0, Qt.UserRole)
             if data and data.get('type') == 'partition':
@@ -1091,10 +1457,19 @@ class QuickWindow(QWidget):
                 menu.addAction('重命名', lambda: self._rename_category(cat_id, current_name))
                 menu.addAction('删除', lambda: self._del_category(cat_id))
                 
-                menu.exec_(self.partition_tree.mapToGlobal(pos))
-            else:
-                 if not item: menu.addAction('➕ 新建分组', self._new_group); menu.exec_(self.partition_tree.mapToGlobal(pos))
+                menu.exec_(sender.mapToGlobal(pos))
+            elif data and data.get('type') == 'trash':
+                menu.addAction('清空回收站', self._empty_trash)
+                menu.exec_(sender.mapToGlobal(pos))
+
         except Exception as e: logging.critical(f"Critical error in _show_partition_context_menu: {e}", exc_info=True)
+    
+    # [补充缺失] 清空回收站
+    def _empty_trash(self):
+        if QMessageBox.Yes == QMessageBox.warning(self, '清空回收站', '确定要清空回收站吗？\n此操作将永久删除所有内容，不可恢复！', QMessageBox.Yes | QMessageBox.No):
+            self.db.empty_trash()
+            self._update_list()
+            self._update_partition_tree()
 
     def _request_new_data(self, cat_id):
         dialog = EditDialog(self.db, category_id_for_new=cat_id, parent=None)
@@ -1170,27 +1545,3 @@ class QuickWindow(QWidget):
             tags_list = [t.strip() for t in new_tags.split(',') if t.strip()]
             if tags_list: self.db.apply_preset_tags_to_category_items(cat_id, tags_list)
             self.data_changed.emit()
-
-    def _draw_book_mocha(self, p):
-        w, h = 56, 76
-        p.setBrush(QColor(245, 240, 225)); p.drawRoundedRect(QRectF(-w/2+6, -h/2+6, w, h), 3, 3)
-        grad = QLinearGradient(-w, -h, w, h)
-        grad.setColorAt(0, QColor(90, 60, 50)); grad.setColorAt(1, QColor(50, 30, 25))
-        p.setBrush(grad); p.drawRoundedRect(QRectF(-w/2, -h/2, w, h), 3, 3)
-        p.setBrush(QColor(120, 20, 30)); p.drawRect(QRectF(w/2 - 15, -h/2, 8, h))
-
-    def _draw_universal_pen(self, p):
-        w_pen, h_pen = 12, 46
-        c_light, c_mid, c_dark = QColor(180, 60, 70), QColor(140, 20, 30), QColor(60, 5, 10)
-        body_grad = QLinearGradient(-w_pen/2, 0, w_pen/2, 0)
-        body_grad.setColorAt(0.0, c_light); body_grad.setColorAt(0.5, c_mid); body_grad.setColorAt(1.0, c_dark)
-        path_body = QPainterPath()
-        path_body.addRoundedRect(QRectF(-w_pen/2, -h_pen/2, w_pen, h_pen), 5, 5)
-        p.setPen(Qt.NoPen); p.setBrush(body_grad); p.drawPath(path_body)
-        path_tip = QPainterPath(); tip_h = 14
-        path_tip.moveTo(-w_pen/2 + 3, h_pen/2); path_tip.lineTo(w_pen/2 - 3, h_pen/2); path_tip.lineTo(0, h_pen/2 + tip_h); path_tip.closeSubpath()
-        tip_grad = QLinearGradient(-5, 0, 5, 0)
-        tip_grad.setColorAt(0, QColor(240, 230, 180)); tip_grad.setColorAt(1, QColor(190, 170, 100))
-        p.setBrush(tip_grad); p.drawPath(path_tip)
-        p.setBrush(QColor(220, 200, 140)); p.drawRect(QRectF(-w_pen/2, h_pen/2 - 4, w_pen, 4))
-        p.setBrush(QColor(210, 190, 130)); p.drawRoundedRect(QRectF(-1.5, -h_pen/2 + 6, 3, 24), 1.5, 1.5)

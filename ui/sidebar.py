@@ -102,6 +102,7 @@ class Sidebar(QTreeWidget):
                 item = QTreeWidgetItem(self, [f"{name} ({counts.get(key, 0)})"])
                 item.setIcon(0, create_svg_icon(icon_filename))
                 item.setData(0, Qt.UserRole, (key, None))
+                # 禁止系统菜单项被拖拽
                 item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled) 
                 item.setExpanded(False)
 
@@ -120,8 +121,8 @@ class Sidebar(QTreeWidget):
             self.setItemWidget(sep_item, 0, container)
 
             user_partitions_root = QTreeWidgetItem(self, ["我的分区"])
-            # [修改] 使用 branch.svg 作为根图标
             user_partitions_root.setIcon(0, create_svg_icon("branch.svg", "white"))
+            # 禁止根节点被拖拽或选中，只作为容器
             user_partitions_root.setFlags(user_partitions_root.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsDragEnabled)
             font = user_partitions_root.font(0)
             font.setBold(True)
@@ -176,22 +177,30 @@ class Sidebar(QTreeWidget):
                 self._add_partition_recursive(p.children, item, counts)
 
     def dragEnterEvent(self, e):
-        if e.mimeData().hasFormat('application/x-tree-widget-internal-move') or \
-           e.mimeData().hasFormat('application/x-idea-id') or \
-           e.mimeData().hasFormat('application/x-idea-ids'):
+        # 【关键修改】优先判断是否是自身发起的拖拽（即排序操作）
+        if e.source() == self:
+            super().dragEnterEvent(e)
+            e.accept()
+        elif e.mimeData().hasFormat('application/x-idea-id') or \
+             e.mimeData().hasFormat('application/x-idea-ids'):
             e.accept()
         else:
             e.ignore()
 
     def dragMoveEvent(self, e):
+        # 【关键修改】如果是自身拖拽（排序），调用 super() 让 Qt 绘制插入线
+        if e.source() == self:
+            super().dragMoveEvent(e)
+            e.accept()
+            return
+
+        # 如果是外部拖入（笔记归档）
         item = self.itemAt(e.pos())
         if item:
             d = item.data(0, Qt.UserRole)
+            # 只允许拖入有效的分类节点
             if d and d[0] in ['category', 'trash', 'bookmark', 'uncategorized']:
                 self.setCurrentItem(item)
-                e.accept()
-                return
-            if e.mimeData().hasFormat('application/x-tree-widget-internal-move'):
                 e.accept()
                 return
         e.ignore()
@@ -208,6 +217,7 @@ class Sidebar(QTreeWidget):
                 ids_to_process = [int(e.mimeData().data('application/x-idea-id'))]
             except Exception: pass
         
+        # 情况1：拖入笔记数据 -> 移动分类
         if ids_to_process:
             try:
                 item = self.itemAt(e.pos())
@@ -234,11 +244,13 @@ class Sidebar(QTreeWidget):
                 e.acceptProposedAction()
             except Exception as err:
                 pass
-        else:
-            super().dropEvent(e)
-            self._save_current_order()
+        # 情况2：自身拖拽 -> 排序
+        elif e.source() == self:
+            super().dropEvent(e) # 让 Qt 完成树节点的移动
+            self._save_current_order() # 保存新顺序到数据库
 
     def _save_current_order(self):
+        """遍历当前树结构并保存顺序"""
         update_list = []
         def iterate_items(parent_item, parent_id):
             for i in range(parent_item.childCount()):
@@ -249,7 +261,20 @@ class Sidebar(QTreeWidget):
                     update_list.append({'id': cat_id, 'sort_order': i, 'parent_id': parent_id})
                     if item.childCount() > 0:
                         iterate_items(item, cat_id)
-        iterate_items(self.invisibleRootItem(), None)
+        
+        # 从根节点开始遍历（排除系统菜单，只遍历“我的分区”下的内容）
+        # 我们的结构是：System Items... -> Separator -> "我的分区" (root for user)
+        # 所以我们需要找到 "我的分区" 节点
+        root_item = None
+        for i in range(self.topLevelItemCount()):
+            item = self.topLevelItem(i)
+            if item.text(0) == "我的分区":
+                root_item = item
+                break
+        
+        if root_item:
+            iterate_items(root_item, None)
+            
         if update_list:
             self.db.save_category_order(update_list)
 
