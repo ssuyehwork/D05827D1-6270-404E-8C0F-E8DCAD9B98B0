@@ -25,7 +25,7 @@ from ui.main_window_parts.metadata_panel import MetadataPanel
 
 class MainWindow(QWidget):
     closing = pyqtSignal()
-    RESIZE_MARGIN = 8
+    RESIZE_MARGIN = 15
 
     def __init__(self, service):
         super().__init__()
@@ -51,6 +51,7 @@ class MainWindow(QWidget):
         
         self.open_dialogs = []
         self.is_metadata_panel_visible = False
+        self.normal_geometry = None
         
         self.setWindowFlags(
             Qt.FramelessWindowHint | 
@@ -75,14 +76,10 @@ class MainWindow(QWidget):
         self.container = QWidget()
         self.container.setObjectName("MainContainer")
         self.container.setStyleSheet(STYLES['main_window'])
+        self.container.setMouseTracking(True)
         root_layout.addWidget(self.container)
         
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(25)
-        shadow.setXOffset(0)
-        shadow.setYOffset(4)
-        shadow.setColor(QColor(0, 0, 0, 100))
-        self.container.setGraphicsEffect(shadow)
+        self._create_shadow_effect()
         
         outer_layout = QVBoxLayout(self.container)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -101,7 +98,7 @@ class MainWindow(QWidget):
         self.header.new_idea_requested.connect(self.new_idea)
         
         outer_layout.addWidget(self.header)
-        
+
         central_content = QWidget()
         central_layout = QHBoxLayout(central_content)
         central_layout.setContentsMargins(0, 0, 0, 0)
@@ -123,6 +120,7 @@ class MainWindow(QWidget):
         self.metadata_panel.tag_added.connect(self._handle_tag_add)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setHandleWidth(1)
         self.main_splitter.setChildrenCollapsible(False)
         self.main_splitter.addWidget(self.sidebar)
 
@@ -148,8 +146,11 @@ class MainWindow(QWidget):
         self.filter_panel.filterChanged.connect(self._on_filter_criteria_changed)
         self.filter_panel.hide()
         
-        self._setup_shortcuts()
         self._restore_window_state()
+
+    def paintEvent(self, event):
+        """优化：移除 CompositionMode_Clear，防止在窗口变换时出现重影残留"""
+        super().paintEvent(event)
 
     def _apply_filters_and_render(self):
         criteria = self.filter_panel.get_checked_criteria()
@@ -779,13 +780,51 @@ class MainWindow(QWidget):
     def mouseDoubleClickEvent(self, event):
         if event.y() < 40: self._toggle_maximize()
         
+    def _get_screen_geometry(self):
+        screen = QApplication.screenAt(self.pos())
+        if not screen:
+            screen = QApplication.primaryScreen()
+        return screen.availableGeometry()
+
     def _toggle_maximize(self):
-        if self.isMaximized():
-            self.showNormal()
-            self.header.set_maximized_state(False)
-        else:
-            self.showMaximized()
-            self.header.set_maximized_state(True)
+        self.setUpdatesEnabled(False)  # 锁定 UI 更新，防止几何变换期间的闪烁和重影
+        try:
+            if self.isMaximized():
+                if self.normal_geometry:
+                    self.setGeometry(self.normal_geometry)
+                else:
+                    screen_geo = self._get_screen_geometry()
+                    self.resize(1000, 600)
+                    qr = self.frameGeometry()
+                    cp = screen_geo.center()
+                    qr.moveCenter(cp)
+                    self.move(qr.topLeft())
+                
+                self.layout().setContentsMargins(12, 12, 12, 12)
+                self._create_shadow_effect()
+                self.header.set_maximized_state(False)
+                self.normal_geometry = None
+                super().setWindowState(Qt.WindowNoState)
+            else:
+                self.normal_geometry = self.geometry()
+                screen_geometry = self._get_screen_geometry()
+                self.setGeometry(screen_geometry)
+                self.layout().setContentsMargins(0, 0, 0, 0)
+                
+                # 彻底清理阴影
+                if hasattr(self, 'shadow_effect') and self.shadow_effect:
+                    try:
+                        self.container.setGraphicsEffect(None)
+                        self.shadow_effect = None
+                    except RuntimeError:
+                        self.shadow_effect = None
+                    
+                self.header.set_maximized_state(True)
+                super().setWindowState(Qt.WindowMaximized)
+        finally:
+            self.setUpdatesEnabled(True)  # 解锁渲染
+            self.container.update()
+            self.update()
 
     def closeEvent(self, event):
         self._save_window_state(); self.closing.emit(); self.hide(); event.ignore()
@@ -794,6 +833,15 @@ class MainWindow(QWidget):
         save_setting("main_window_geometry_hex", self.saveGeometry().toHex().data().decode())
         save_setting("main_window_maximized", self.isMaximized())
         if hasattr(self, "sidebar"): save_setting("sidebar_width", self.sidebar.width())
+
+    def _create_shadow_effect(self):
+        """为窗口容器创建并应用阴影效果"""
+        self.shadow_effect = QGraphicsDropShadowEffect(self)
+        self.shadow_effect.setBlurRadius(25)
+        self.shadow_effect.setXOffset(0)
+        self.shadow_effect.setYOffset(4)
+        self.shadow_effect.setColor(QColor(0, 0, 0, 100))
+        self.container.setGraphicsEffect(self.shadow_effect)
 
     def refresh_logo(self):
         """刷新标题栏 Logo"""
@@ -810,16 +858,33 @@ class MainWindow(QWidget):
         else: self.resize(1000, 500)
         
         if load_setting("main_window_maximized", False): 
-            self.showMaximized()
-            self.header.set_maximized_state(True)
+            QTimer.singleShot(0, lambda: self._apply_maximized_ui_state())
         else: 
             self.header.set_maximized_state(False)
             
         sw = load_setting("sidebar_width")
         if sw and hasattr(self, "main_splitter"): QTimer.singleShot(0, lambda: self.main_splitter.setSizes([int(sw), self.width()-int(sw)]))
-
+        
         # Restore metadata panel visibility
         if load_setting("metadata_panel_visible", False):
             self._show_metadata_panel()
+
+    def _apply_maximized_ui_state(self):
+        """启动时应用最大化状态的 UI 特效"""
+        self.normal_geometry = self.geometry()
+        screen_geometry = self._get_screen_geometry()
+        self.setGeometry(screen_geometry)
+        self.layout().setContentsMargins(0, 0, 0, 0)
+        
+        # 清理阴影效果
+        if hasattr(self, 'shadow_effect') and self.shadow_effect:
+            try:
+                self.container.setGraphicsEffect(None)
+                self.shadow_effect = None
+            except RuntimeError:
+                self.shadow_effect = None
+                
+        self.header.set_maximized_state(True)
+        super().setWindowState(Qt.WindowMaximized)
 
     def show_main_window(self): self.show(); self.activateWindow()

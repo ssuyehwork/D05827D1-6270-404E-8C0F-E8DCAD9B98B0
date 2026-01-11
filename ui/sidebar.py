@@ -38,7 +38,7 @@ class Sidebar(QTreeWidget):
         # 改由代码控制不同类型 Item 的高度，从而允许分隔线变矮
         self.setStyleSheet(f"""
             QTreeWidget {{
-                background-color: {COLORS['bg_mid']};
+                background-color: transparent;
                 color: #e0e0e0;
                 border: none;
                 font-size: 13px;

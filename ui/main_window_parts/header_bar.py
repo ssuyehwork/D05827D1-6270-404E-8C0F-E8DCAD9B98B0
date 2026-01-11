@@ -24,16 +24,10 @@ class HeaderBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("HeaderBar") # 显式设置 ObjectName 以便样式表精准匹配
         self.setFixedHeight(40)
-        self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {COLORS['bg_mid']};
-                border-bottom: 1px solid {COLORS['bg_light']};
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-            }}
-        """)
         self._init_ui()
+        self.set_maximized_state(False) # 必须在 _init_ui 之后调用
 
     def _init_ui(self):
         layout = QHBoxLayout(self)
@@ -124,16 +118,16 @@ class HeaderBar(QWidget):
         layout.addStretch()
 
         # 4. Functional Buttons (Filter, Add, Metadata Toggle)
+        # 优化：显式指定 border:none 和 background:transparent，防止继承父级 QWidget 的背景样式
         func_btn_style = """
             QPushButton {
                 background-color: transparent;
                 border: none;
-                border-radius: 5px;
-                width: 26px;
-                height: 26px;
+                border-radius: 6px;
+                color: #aaa;
             }
-            QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); }
-            QPushButton:pressed { background-color: rgba(255, 255, 255, 0.2); }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.08); }
+            QPushButton:pressed { background-color: rgba(255, 255, 255, 0.15); }
         """
         
         self.filter_btn = self._create_btn('select.svg', "高级筛选 (Ctrl+G)", func_btn_style, checkable=True)
@@ -156,15 +150,20 @@ class HeaderBar(QWidget):
         self.max_btn = self._create_btn('win_max.svg', "最大化", func_btn_style)
         self.max_btn.clicked.connect(self.window_maximized.emit)
         
-        close_btn = self._create_btn('win_close.svg', "关闭", func_btn_style + " QPushButton:hover { background-color: #e74c3c; }")
-        close_btn.clicked.connect(self.window_closed.emit)
+        self.close_btn_base_style = func_btn_style
+        self.close_btn = self._create_btn('win_close.svg', "关闭", self.close_btn_base_style)
+        self.close_btn.setObjectName("CloseBtn") # 方便 CSS 选择
+        self.close_btn.clicked.connect(self.window_closed.emit)
 
-        layout.addWidget(min_btn); layout.addSpacing(2)
-        layout.addWidget(self.max_btn); layout.addSpacing(2)
-        layout.addWidget(close_btn)
+        layout.addWidget(min_btn); layout.addSpacing(1)
+        layout.addWidget(self.max_btn); layout.addSpacing(1)
+        layout.addWidget(self.close_btn)
 
     def _create_btn(self, icon, tip, style, checkable=False):
         btn = QPushButton()
+        btn.setFixedSize(30, 30)
+        from PyQt5.QtCore import QSize
+        btn.setIconSize(QSize(16, 16)) # 规范化图标尺寸，避免因 SVG 视口不同导致的视觉大小差异
         # 对于 select.svg 和 action_add.svg 使用白色，其他使用灰色，保持原有视觉
         color = '#FFF' if icon in ['select.svg', 'action_add.svg'] else '#aaa'
         btn.setIcon(create_svg_icon(icon, color))
@@ -198,15 +197,49 @@ class HeaderBar(QWidget):
         self.btn_last.clicked.connect(lambda: self.page_changed.emit(total))
 
     def set_maximized_state(self, is_max):
-        """外部调用：更新最大化按钮图标"""
+        """外部调用：更新最大化按钮图标和整体圆角"""
         icon = 'win_restore.svg' if is_max else 'win_max.svg'
-        self.max_btn.setIcon(create_svg_icon(icon, "#aaa"))
+        if hasattr(self, 'max_btn'):
+            self.max_btn.setIcon(create_svg_icon(icon, "#aaa"))
         
-        # 更新圆角样式 (最大化时无圆角，还原时有圆角)
-        if is_max:
-            self.setStyleSheet(f"QWidget {{ background-color: {COLORS['bg_mid']}; border-radius: 0px; border-bottom: 1px solid {COLORS['bg_light']}; }}")
-        else:
-            self.setStyleSheet(f"QWidget {{ background-color: {COLORS['bg_mid']}; border-bottom: 1px solid {COLORS['bg_light']}; border-top-left-radius: 8px; border-top-right-radius: 8px; }}")
+        # 使用动态属性触发样式更新，避免全量重新解析 QSS 字符串
+        # 这对于减少界面闪烁和提升性能至关重要
+        self.setProperty("maximized", is_max)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        
+        # 强制更新布局和渲染
+        self.update()
+
+    def _init_ui(self):
+        # 预设基础样式，包含对属性选择器的支持
+        self.setObjectName("HeaderBar")
+        radius_v = "0px" if self.property("maximized") else "8px"
+        self.setStyleSheet(f"""
+            QWidget#HeaderBar {{
+                background-color: {COLORS['bg_mid']};
+                border-bottom: 1px solid {COLORS['bg_light']};
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }}
+            QWidget#HeaderBar[maximized="true"] {{
+                border-top-left-radius: 0px;
+                border-top-right-radius: 0px;
+            }}
+            QPushButton {{
+                background: transparent;
+                border: none;
+            }}
+            #CloseBtn:hover {{ 
+                background-color: #e81123; 
+                border-top-right-radius: 8px; 
+            }}
+            QWidget#HeaderBar[maximized="true"] #CloseBtn:hover {{
+                border-top-right-radius: 0px;
+            }}
+        """)
+        
+        layout = QHBoxLayout(self)
 
     def set_filter_active(self, active):
         """外部调用：同步筛选按钮状态"""

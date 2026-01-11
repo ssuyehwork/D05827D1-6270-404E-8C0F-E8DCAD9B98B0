@@ -166,7 +166,7 @@ class MetadataPanel(QWidget):
         self.current_selected_ids = set()
         
         self.setObjectName("RightPanel")
-        self.setStyleSheet(f"#RightPanel {{ background-color: {COLORS['bg_mid']}; }}")
+        self.setStyleSheet(f"#RightPanel {{ background-color: transparent; }}")
         self.setFixedWidth(240)
         
         self._init_ui()
