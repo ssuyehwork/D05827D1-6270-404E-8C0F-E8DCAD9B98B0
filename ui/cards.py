@@ -2,7 +2,7 @@
 # ui/cards.py
 import sys
 from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QApplication, QSizePolicy, QWidget
-from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QSize, QPoint
 from PyQt5.QtGui import QDrag, QPixmap, QImage, QPainter
 from core.config import STYLES, COLORS
 from ui.utils import create_svg_icon
@@ -254,10 +254,19 @@ class IdeaCard(QFrame):
         mime.setData('application/x-idea-ids', (','.join(map(str, ids_to_move))).encode('utf-8'))
         mime.setData('application/x-idea-id', str(self.id).encode())
         drag.setMimeData(mime)
+        
         pixmap = self.grab().scaledToWidth(200, Qt.SmoothTransformation)
         drag.setPixmap(pixmap)
-        drag.setHotSpot(e.pos())
-        drag.exec_(Qt.MoveAction)
+        
+        # [修正] 修正热点计算逻辑，精确控制快照在光标右上角的位置
+        offset = 25
+        # 热点是快照上与光标对齐的点。
+        # 将其设置为(-offset, pixmap.height() + offset) 可以
+        # 将快照的左下角精确定位在(光标.x + offset, 光标.y - offset)
+        drag.setHotSpot(QPoint(-offset, pixmap.height() + offset))
+        
+        # [修改] 将操作类型改为CopyAction以显示"+"号光标
+        drag.exec_(Qt.CopyAction)
         
     def mouseReleaseEvent(self, e):
         if self._is_potential_click and e.button() == Qt.LeftButton:

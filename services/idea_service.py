@@ -54,7 +54,7 @@ class IdeaService:
         self.idea_repo.update_field(iid, 'is_favorite', 1 if state else 0)
         app_signals.data_changed.emit()
 
-    def set_deleted(self, iid, state):
+    def set_deleted(self, iid, state, emit_signal=True):
         val = 1 if state else 0
         self.idea_repo.update_field(iid, 'is_deleted', val)
         if state:
@@ -62,7 +62,8 @@ class IdeaService:
             self.idea_repo.update_field(iid, 'color', COLORS['trash'])
         else:
             self.idea_repo.update_field(iid, 'color', COLORS['uncategorized'])
-        app_signals.data_changed.emit()
+        if emit_signal:
+            app_signals.data_changed.emit()
 
     def set_rating(self, iid, rating):
         self.idea_repo.update_field(iid, 'rating', rating)
@@ -72,11 +73,12 @@ class IdeaService:
         self.idea_repo.delete_permanent(iid)
         app_signals.data_changed.emit()
 
-    def move_category(self, iid, cat_id):
+    def move_category(self, iid, cat_id, emit_signal=True):
         self.idea_repo.update_field(iid, 'category_id', cat_id)
         self.idea_repo.update_field(iid, 'is_deleted', 0)
         # 如果移动到分类，应应用分类颜色（略）
-        app_signals.data_changed.emit()
+        if emit_signal:
+            app_signals.data_changed.emit()
 
     def get_lock_status(self, ids):
         return self.idea_repo.get_lock_status(ids)

@@ -22,6 +22,7 @@ class Sidebar(QTreeWidget):
     filter_changed = pyqtSignal(str, object)
     data_changed = pyqtSignal()
     new_data_requested = pyqtSignal(int)
+    items_moved = pyqtSignal(list)
 
     def __init__(self, service, parent=None):
         super().__init__(parent)
@@ -223,12 +224,12 @@ class Sidebar(QTreeWidget):
                     save_setting('recent_categories', recent_cats)
                 
                 for iid in ids_to_process:
-                    if key == 'category': self.db.move_category(iid, val)
-                    elif key == 'uncategorized': self.db.move_category(iid, None)
-                    elif key == 'trash': self.db.set_deleted(iid, True)
+                    if key == 'category': self.db.move_category(iid, val, emit_signal=False)
+                    elif key == 'uncategorized': self.db.move_category(iid, None, emit_signal=False)
+                    elif key == 'trash': self.db.set_deleted(iid, True, emit_signal=False)
                     elif key == 'bookmark': self.db.set_favorite(iid, True)
                 
-                self.data_changed.emit()
+                self.items_moved.emit(ids_to_process)
                 self.refresh()
                 e.acceptProposedAction()
             except Exception as err:

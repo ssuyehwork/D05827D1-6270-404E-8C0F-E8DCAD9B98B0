@@ -117,6 +117,7 @@ class MainWindow(QWidget):
         self.sidebar.filter_changed.connect(self._set_filter)
         self.sidebar.data_changed.connect(self._load_data)
         self.sidebar.new_data_requested.connect(self._on_new_data_in_category_requested)
+        self.sidebar.items_moved.connect(self._handle_items_moved)
         self.sidebar.setMinimumWidth(200)
         
         # 中间卡片区 (包含操作栏)
@@ -174,6 +175,15 @@ class MainWindow(QWidget):
         if not self.selected_ids or not tags: return
         self.service.add_tags_to_multiple_ideas(list(self.selected_ids), tags)
         self._refresh_all()
+
+    def _handle_items_moved(self, idea_ids):
+        """轻量级处理器，仅从视图中移除卡片"""
+        if not idea_ids: return
+        for iid in idea_ids:
+            self.card_list_view.remove_card(iid)
+            if iid in self.selected_ids:
+                self.selected_ids.remove(iid)
+        self._update_ui_state()
 
     def _set_page(self, page_num):
         if page_num < 1: page_num = 1
@@ -578,15 +588,17 @@ class MainWindow(QWidget):
             self._load_data(); self._update_ui_state(); self.sidebar.refresh()
 
     def _do_del(self):
-        if self.selected_ids:
-            valid_ids = self._get_valid_ids_ignoring_locked(self.selected_ids)
-            if not valid_ids: self._show_tooltip("🔒 锁定项目无法删除", 1500); return
-            for iid in valid_ids:
-                self.service.set_deleted(iid, True)
-                self.card_list_view.remove_card(iid)
-            self.selected_ids.clear()
-            self._update_ui_state()
-            self.sidebar.refresh()
+        if not self.selected_ids: return
+        valid_ids = self._get_valid_ids_ignoring_locked(self.selected_ids)
+        if not valid_ids: self._show_tooltip("🔒 锁定项目无法删除", 1500); return
+        
+        for iid in valid_ids:
+            self.service.set_deleted(iid, True, emit_signal=False)
+            self.card_list_view.remove_card(iid)
+            
+        self.selected_ids.clear()
+        self._update_ui_state()
+        self.sidebar.refresh()
 
     def _do_restore(self):
         if self.selected_ids:
@@ -629,20 +641,23 @@ class MainWindow(QWidget):
         return [iid for iid in ids if not status_map.get(iid, 0)]
 
     def _move_to_category(self, cat_id):
-        if self.selected_ids:
-            # [新增] 更新最近使用的分类列表
-            if cat_id is not None:
-                recent_cats = load_setting('recent_categories', [])
-                if cat_id in recent_cats: recent_cats.remove(cat_id)
-                recent_cats.insert(0, cat_id)
-                save_setting('recent_categories', recent_cats)
+        if not self.selected_ids: return
+        
+        # [新增] 更新最近使用的分类列表
+        if cat_id is not None:
+            recent_cats = load_setting('recent_categories', [])
+            if cat_id in recent_cats: recent_cats.remove(cat_id)
+            recent_cats.insert(0, cat_id)
+            save_setting('recent_categories', recent_cats)
 
-            for iid in self.selected_ids:
-                self.service.move_category(iid, cat_id)
-                self.card_list_view.remove_card(iid)
-            self.selected_ids.clear()
-            self._update_ui_state()
-            self.sidebar.refresh()
+        ids_to_move = list(self.selected_ids)
+        for iid in ids_to_move:
+            self.service.move_category(iid, cat_id, emit_signal=False)
+            self.card_list_view.remove_card(iid)
+        
+        self.selected_ids.clear()
+        self._update_ui_state()
+        self.sidebar.refresh()
 
     def _update_ui_state(self):
         in_trash = (self.curr_filter[0] == 'trash')
