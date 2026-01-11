@@ -149,8 +149,9 @@ class IdeaService:
         return self.idea_repo.get_counts()
         
     def add_category(self, name, parent_id=None):
-        self.category_repo.add(name, parent_id)
+        new_id = self.category_repo.add(name, parent_id)
         app_signals.data_changed.emit()
+        return new_id
         
     def rename_category(self, cat_id, new_name):
         self.category_repo.rename(cat_id, new_name)

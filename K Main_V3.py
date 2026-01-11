@@ -15,8 +15,6 @@ from core.signals import app_signals
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
 from ui.ball import FloatingBall
-from ui.action_popup import ActionPopup
-from ui.common_tags_manager import CommonTagsManager
 from core.settings import load_setting
 
 SERVER_NAME = "K_KUAIJIBIJI_SINGLE_INSTANCE_SERVER"
@@ -46,9 +44,7 @@ class AppManager(QObject):
         self.main_window = None
         self.quick_window = None
         self.ball = None
-        self.popup = None 
         self.tray_icon = None
-        self.tags_manager_dialog = None
         
         # 全局热键信号
         self.hotkey_signal = HotkeySignal()
@@ -100,8 +96,6 @@ class AppManager(QObject):
             m.addAction(create_svg_icon('monitor.svg'), '打开主界面', self.ball.request_show_main_window.emit)
             m.addAction(create_svg_icon('action_add.svg'), '新建灵感', self.main_window.new_idea)
             m.addSeparator()
-            m.addAction(create_svg_icon('tag.svg'), '管理常用标签', self._open_common_tags_manager) 
-            m.addSeparator()
             m.addAction(create_svg_icon('power.svg'), '退出', self.ball.request_quit_app.emit)
             m.exec_(e.globalPos())
 
@@ -121,11 +115,6 @@ class AppManager(QObject):
 
         self.quick_window = QuickWindow(self.service) 
         self.quick_window.toggle_main_window_requested.connect(self.toggle_main_window)
-        
-        self.popup = ActionPopup(self.service) 
-        self.popup.request_favorite.connect(self._handle_popup_favorite)
-        self.popup.request_tag_toggle.connect(self._handle_popup_tag_toggle)
-        self.popup.request_manager.connect(self._open_common_tags_manager)
         
         self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
         
@@ -179,31 +168,8 @@ class AppManager(QObject):
     def _on_tray_icon_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger: self.show_quick_window()
 
-    def _open_common_tags_manager(self):
-        if self.tags_manager_dialog and self.tags_manager_dialog.isVisible():
-            self._force_activate(self.tags_manager_dialog); return
-        self.tags_manager_dialog = CommonTagsManager()
-        self.tags_manager_dialog.finished.connect(self._on_tags_manager_closed)
-        self.tags_manager_dialog.show(); self._force_activate(self.tags_manager_dialog)
-
-    def _on_tags_manager_closed(self, result):
-        if result == QDialog.Accepted and self.popup: self.popup.common_tags_bar.reload_tags()
-        self.tags_manager_dialog = None
-
     def _on_clipboard_data_captured(self, idea_id):
         self.ball.trigger_clipboard_feedback()
-        if self.popup: self.popup.show_at_mouse(idea_id)
-
-    def _handle_popup_favorite(self, idea_id):
-        idea_data = self.service.get_idea(idea_id)
-        if not idea_data: return
-        is_favorite = idea_data['is_favorite'] == 1
-        self.service.set_favorite(idea_id, not is_favorite)
-
-    def _handle_popup_tag_toggle(self, idea_id, tag_name):
-        current_tags = self.service.get_tags(idea_id)
-        if tag_name in current_tags: self.service.remove_tag_from_multiple_ideas([idea_id], tag_name)
-        else: self.service.add_tags_to_multiple_ideas([idea_id], [tag_name])
 
     def _force_activate(self, window):
         if not window: return

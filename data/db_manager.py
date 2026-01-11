@@ -667,7 +667,9 @@ class DatabaseManager:
             'INSERT INTO categories (name, parent_id, sort_order, color) VALUES (?, ?, ?, ?)', 
             (name, parent_id, new_order, chosen_color)
         )
+        new_id = c.lastrowid
         self.conn.commit()
+        return new_id
 
     def rename_category(self, cat_id, new_name):
         c = self.conn.cursor()

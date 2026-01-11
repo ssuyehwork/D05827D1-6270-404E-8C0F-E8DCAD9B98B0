@@ -530,12 +530,25 @@ class QuickWindow(QWidget):
             
             menu.addSeparator()
             
-            # [修改] 使用 branch.svg
             cat_menu = menu.addMenu(create_svg_icon('branch.svg', '#cccccc'), '移动到分类')
-            cat_menu.addAction('⚠️ 未分类', lambda: self._move_to_category(None))
-            for cat in self.db.get_categories():
-                # [修改] 使用 branch.svg 并应用分类颜色
-                cat_menu.addAction(create_svg_icon('branch.svg', cat['color']), f'{cat["name"]}', lambda cid=cat["id"]: self._move_to_category(cid))
+
+            # [优化] 仅显示最近使用的 15 个分类
+            recent_cats = load_setting('recent_categories', [])
+            all_cats = {c['id']: c for c in self.db.get_categories()}
+            
+            # 添加固定的“未分类”选项
+            action_uncategorized = cat_menu.addAction('⚠️ 未分类')
+            action_uncategorized.triggered.connect(lambda: self._move_to_category(None))
+
+            # 添加最近使用且仍然存在的分类
+            count = 0
+            for cat_id in recent_cats:
+                if count >= 15: break
+                if cat_id in all_cats:
+                    cat = all_cats[cat_id]
+                    action = cat_menu.addAction(create_svg_icon('branch.svg', cat['color']), f"{cat['name']}")
+                    action.triggered.connect(lambda _, cid=cat['id']: self._move_to_category(cid))
+                    count += 1
             
             menu.addSeparator()
             
@@ -565,6 +578,13 @@ class QuickWindow(QWidget):
     def _move_to_category(self, cat_id):
         iid = self._get_selected_id()
         if iid:
+            # [新增] 更新最近使用的分类列表
+            if cat_id is not None:
+                recent_cats = load_setting('recent_categories', [])
+                if cat_id in recent_cats: recent_cats.remove(cat_id)
+                recent_cats.insert(0, cat_id)
+                save_setting('recent_categories', recent_cats)
+
             self.db.move_category(iid, cat_id)
             self._update_list()
             self._update_partition_tree()
@@ -652,9 +672,17 @@ class QuickWindow(QWidget):
 
         if target_type == 'bookmark': self.db.set_favorite(idea_id, True)
         elif target_type == 'trash': self.db.set_deleted(idea_id, True)
-        elif target_type == 'uncategorized': self.db.move_category(idea_id, None)
-        elif target_type == 'partition': self.db.move_category(idea_id, cat_id)
-        
+        elif target_type == 'uncategorized': 
+            self.db.move_category(idea_id, None)
+        elif target_type == 'partition': 
+            self.db.move_category(idea_id, cat_id)
+            # [修正] 拖拽也需要更新最近使用列表
+            if cat_id is not None:
+                recent_cats = load_setting('recent_categories', [])
+                if cat_id in recent_cats: recent_cats.remove(cat_id)
+                recent_cats.insert(0, cat_id)
+                save_setting('recent_categories', recent_cats)
+
         self._update_list(); self._update_partition_tree()
 
     def _save_partition_order(self):
@@ -1077,11 +1105,25 @@ class QuickWindow(QWidget):
 
     def _new_group(self):
         text, ok = QInputDialog.getText(self, '新建组', '组名称:')
-        if ok and text: self.db.add_category(text, parent_id=None); self._update_partition_tree()
+        if ok and text: 
+            new_cat_id = self.db.add_category(text, parent_id=None)
+            if new_cat_id:
+                recent_cats = load_setting('recent_categories', [])
+                if new_cat_id in recent_cats: recent_cats.remove(new_cat_id)
+                recent_cats.insert(0, new_cat_id)
+                save_setting('recent_categories', recent_cats)
+            self._update_partition_tree()
             
     def _new_zone(self, parent_id):
         text, ok = QInputDialog.getText(self, '新建区', '区名称:')
-        if ok and text: self.db.add_category(text, parent_id=parent_id); self._update_partition_tree()
+        if ok and text: 
+            new_cat_id = self.db.add_category(text, parent_id=parent_id)
+            if new_cat_id:
+                recent_cats = load_setting('recent_categories', [])
+                if new_cat_id in recent_cats: recent_cats.remove(new_cat_id)
+                recent_cats.insert(0, new_cat_id)
+                save_setting('recent_categories', recent_cats)
+            self._update_partition_tree()
 
     def _rename_category(self, cat_id, old_name):
         text, ok = QInputDialog.getText(self, '重命名', '新名称:', text=old_name)

@@ -630,6 +630,13 @@ class MainWindow(QWidget):
 
     def _move_to_category(self, cat_id):
         if self.selected_ids:
+            # [新增] 更新最近使用的分类列表
+            if cat_id is not None:
+                recent_cats = load_setting('recent_categories', [])
+                if cat_id in recent_cats: recent_cats.remove(cat_id)
+                recent_cats.insert(0, cat_id)
+                save_setting('recent_categories', recent_cats)
+
             for iid in self.selected_ids:
                 self.service.move_category(iid, cat_id)
                 self.card_list_view.remove_card(iid)
@@ -718,8 +725,24 @@ class MainWindow(QWidget):
             menu.addAction(create_svg_icon('bookmark.svg', '#ff6b81'), '取消书签' if data['is_favorite'] else '添加书签', self._do_fav)
             menu.addSeparator()
             cat_menu = menu.addMenu(create_svg_icon('folder.svg', '#cccccc'), '移动到分类')
-            cat_menu.addAction('⚠️ 未分类', lambda: self._move_to_category(None))
-            for cat in self.service.get_categories(): cat_menu.addAction(f'📂 {cat["name"]}', lambda cid=cat["id"]: self._move_to_category(cid))
+            
+            # [优化] 仅显示最近使用的 15 个分类
+            recent_cats = load_setting('recent_categories', [])
+            all_cats = {c['id']: c for c in self.service.get_categories()}
+            
+            # 添加固定的“未分类”选项
+            action_uncategorized = cat_menu.addAction('⚠️ 未分类')
+            action_uncategorized.triggered.connect(lambda: self._move_to_category(None))
+
+            # 添加最近使用且仍然存在的分类
+            count = 0
+            for cat_id in recent_cats:
+                if count >= 15: break
+                if cat_id in all_cats:
+                    cat = all_cats[cat_id]
+                    action = cat_menu.addAction(f"📂 {cat['name']}")
+                    action.triggered.connect(lambda _, cid=cat['id']: self._move_to_category(cid))
+                    count += 1
             menu.addSeparator()
             if not is_locked: menu.addAction(create_svg_icon('action_delete.svg', '#e74c3c'), '移至回收站', self._do_del)
             else: act = menu.addAction(create_svg_icon('action_delete.svg', '#555555'), '移至回收站 (已锁定)'); act.setEnabled(False)

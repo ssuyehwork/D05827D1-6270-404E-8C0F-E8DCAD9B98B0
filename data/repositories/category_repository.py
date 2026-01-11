@@ -30,7 +30,9 @@ class CategoryRepository:
             'INSERT INTO categories (name, parent_id, sort_order, color) VALUES (?, ?, ?, ?)', 
             (name, parent_id, new_order, chosen_color)
         )
+        new_id = c.lastrowid
         self.db.commit()
+        return new_id
 
     def rename(self, cat_id, new_name):
         c = self.db.get_cursor()
