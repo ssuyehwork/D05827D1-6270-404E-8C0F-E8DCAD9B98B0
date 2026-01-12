@@ -794,10 +794,9 @@ class QuickWindow(QWidget):
         iid = self._get_selected_id()
         if iid and item:
             self.db.toggle_field(iid, 'is_favorite')
-            new_data = self.db.get_idea(iid)
-            if new_data:
-                item.setData(Qt.UserRole, new_data)
-                self._update_list_item_tooltip(item, new_data)
+            # 此处不再需要手动更新UI (item.setData...)
+            # 因为 toggle_field 会触发全局信号，由主更新函数 _update_list 统一刷新
+            # 避免了因列表刷新导致 item 对象被删除而引发的崩溃
 
     def _do_toggle_pin(self):
         iid = self._get_selected_id()
