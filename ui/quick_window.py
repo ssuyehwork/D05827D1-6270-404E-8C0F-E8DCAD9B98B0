@@ -726,11 +726,9 @@ class QuickWindow(QWidget):
         idea_id = self._get_selected_id()
         if item and idea_id:
             self.db.set_rating(idea_id, rating)
-            new_data = self.db.get_idea(idea_id)
-            if new_data:
-                item.setData(Qt.UserRole, new_data)
-                item.setText(self._get_content_display(new_data))
-                self._update_list_item_tooltip(item, new_data)
+            # 此处不再需要手动更新UI (item.setData...)
+            # 因为 set_rating 会触发全局信号，由主更新函数 _update_list 统一刷新
+            # 避免了因列表刷新导致 item 对象被删除而引发的崩溃
 
     def _move_to_category(self, cat_id):
         iid = self._get_selected_id()
@@ -742,8 +740,7 @@ class QuickWindow(QWidget):
                 save_setting('recent_categories', recent_cats)
 
             self.db.move_category(iid, cat_id)
-            self._update_list()
-            self._update_partition_tree()
+            # 全局信号将处理UI刷新
 
     def _copy_item_content(self, data):
         item_type = data['item_type'] or 'text'
@@ -765,10 +762,9 @@ class QuickWindow(QWidget):
         current_state = status.get(iid, 0)
         new_state = 0 if current_state else 1
         self.db.set_locked([iid], new_state)
-        new_data = self.db.get_idea(iid)
-        if new_data:
-            item.setData(Qt.UserRole, new_data)
-            self._update_list_item_tooltip(item, new_data)
+        # 此处不再需要手动更新UI (item.setData...)
+        # 因为 set_locked 会触发全局信号，由主更新函数 _update_list 统一刷新
+        # 避免了因列表刷新导致 item 对象被删除而引发的崩溃
     
     def _do_edit_selected(self):
         iid = self._get_selected_id()
@@ -789,8 +785,7 @@ class QuickWindow(QWidget):
             status = self.db.get_lock_status([iid])
             if status.get(iid, 0): return
             self.db.set_deleted(iid, True)
-            self._update_list()
-            self._update_partition_tree()
+            # 全局信号将处理UI刷新
 
     def _do_toggle_favorite(self):
         item = self.list_widget.currentItem()
@@ -805,7 +800,9 @@ class QuickWindow(QWidget):
         iid = self._get_selected_id()
         if iid:
             self.db.toggle_field(iid, 'is_pinned')
-            self._update_list()
+            # 此处不再需要手动更新UI (item.setData...)
+            # 因为 toggle_field 会触发全局信号，由主更新函数 _update_list 统一刷新
+            # 避免了因列表刷新导致 item 对象被删除而引发的崩溃
 
     def _handle_category_drop(self, idea_id, cat_id):
         target_item = None
@@ -837,8 +834,7 @@ class QuickWindow(QWidget):
                 recent_cats.insert(0, cat_id)
                 save_setting('recent_categories', recent_cats)
 
-        QTimer.singleShot(10, self._update_list)
-        QTimer.singleShot(10, self._update_partition_tree)
+        # 全局信号将处理UI刷新
 
     def _save_partition_order(self):
         update_list = []
