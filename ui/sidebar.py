@@ -114,15 +114,14 @@ class Sidebar(QWidget):
         
         # 1. 系统树
         self.system_tree = DropTreeWidget()
-        # [修改] 移除初始化时的硬编码高度，高度将在 refresh_sync 中根据实际条目数动态设置
         self.system_tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.system_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.system_tree.setDragEnabled(False) 
         
         # 2. 分区树
         self.partition_tree = DropTreeWidget()
         
         # --- 样式 ---
-        # 确保行高固定为 25px，以便精确计算总高度
         common_style = f"""
             QTreeWidget {{
                 background-color: {COLORS['bg_mid']};
@@ -136,7 +135,6 @@ class Sidebar(QWidget):
                 height: 25px;
                 padding-left: 4px;
                 border: none;
-                border-bottom: 1px solid #2A2A2A; 
                 margin: 0px; 
             }}
             QTreeWidget::item:hover {{
@@ -145,7 +143,6 @@ class Sidebar(QWidget):
             QTreeWidget::item:selected {{
                 background-color: #37373d;
                 color: white;
-                border-bottom: 1px solid #2A2A2A;
             }}
             QScrollBar:vertical {{ border: none; background: transparent; width: 6px; margin: 0px; }}
             QScrollBar::handle:vertical {{ background: #444; border-radius: 3px; min-height: 20px; }}
@@ -157,14 +154,6 @@ class Sidebar(QWidget):
         self.partition_tree.setStyleSheet(common_style)
         
         layout.addWidget(self.system_tree)
-        
-        # 分割线
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet("background-color: #1e1e1e; border: none; min-height: 2px; max-height: 2px;")
-        layout.addWidget(line)
-        
         layout.addWidget(self.partition_tree)
 
     def _connect_signals(self):
@@ -207,9 +196,12 @@ class Sidebar(QWidget):
                 ("回收站", 'trash', 'trash.svg')
             ]
             
-            # [关键修复] 动态计算高度：条目数量 * 单行高度(25px)
-            # 无论列表里有几个项目，高度都自动匹配，绝不会有空隙
-            self.system_tree.setFixedHeight(len(sys_items) * 25)
+            # 精确计算高度并彻底禁用滚动
+            item_height = 25
+            total_height = len(sys_items) * item_height
+            self.system_tree.setFixedHeight(total_height)
+            self.system_tree.setMinimumHeight(total_height)
+            self.system_tree.setMaximumHeight(total_height)
             
             for label, key, icon in sys_items:
                 data = {'type': key, 'id': None}
@@ -218,6 +210,10 @@ class Sidebar(QWidget):
                 item.setIcon(0, create_svg_icon(icon))
                 item.setData(0, Qt.UserRole, data)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled)
+            
+            # 彻底禁用系统树的滚动
+            self.system_tree.verticalScrollBar().setRange(0, 0)
+            self.system_tree.verticalScrollBar().setEnabled(False)
             
             # 用户分区
             user_root = QTreeWidgetItem(self.partition_tree, ["我的分区"])
