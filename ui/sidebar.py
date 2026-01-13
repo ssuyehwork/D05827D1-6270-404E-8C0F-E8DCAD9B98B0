@@ -114,7 +114,6 @@ class Sidebar(QWidget):
         
         # 1. 系统树
         self.system_tree = DropTreeWidget()
-        # 高度动态计算
         self.system_tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.system_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.system_tree.setDragEnabled(False) 
@@ -136,7 +135,6 @@ class Sidebar(QWidget):
                 height: 25px;
                 padding-left: 4px;
                 border: none;
-                border-bottom: 1px solid #2A2A2A; 
                 margin: 0px; 
             }}
             QTreeWidget::item:hover {{
@@ -145,7 +143,6 @@ class Sidebar(QWidget):
             QTreeWidget::item:selected {{
                 background-color: #37373d;
                 color: white;
-                border-bottom: 1px solid #2A2A2A;
             }}
             QScrollBar:vertical {{ border: none; background: transparent; width: 6px; margin: 0px; }}
             QScrollBar::handle:vertical {{ background: #444; border-radius: 3px; min-height: 20px; }}
@@ -199,11 +196,12 @@ class Sidebar(QWidget):
                 ("回收站", 'trash', 'trash.svg')
             ]
             
-            # 动态计算高度
+            # 精确计算高度并彻底禁用滚动
             item_height = 25
             total_height = len(sys_items) * item_height
             self.system_tree.setFixedHeight(total_height)
-            self.system_tree.verticalScrollBar().setRange(0, 0)
+            self.system_tree.setMinimumHeight(total_height)
+            self.system_tree.setMaximumHeight(total_height)
             
             for label, key, icon in sys_items:
                 data = {'type': key, 'id': None}
@@ -212,6 +210,10 @@ class Sidebar(QWidget):
                 item.setIcon(0, create_svg_icon(icon))
                 item.setData(0, Qt.UserRole, data)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled)
+            
+            # 彻底禁用系统树的滚动
+            self.system_tree.verticalScrollBar().setRange(0, 0)
+            self.system_tree.verticalScrollBar().setEnabled(False)
             
             # 用户分区
             user_root = QTreeWidgetItem(self.partition_tree, ["我的分区"])
@@ -365,7 +367,7 @@ class Sidebar(QWidget):
             menu.addAction('新建灵感', lambda: self.new_data_requested.emit(cat_id))
             menu.addSeparator()
             menu.addAction('设置颜色', lambda: self._change_color(cat_id))
-            # [功能] 找回随机颜色
+            # [功能] 随机颜色
             menu.addAction('随机颜色', lambda: self._set_random_color(cat_id))
             menu.addAction('设置预设标签', lambda: self._set_preset_tags(cat_id))
             menu.addSeparator()
