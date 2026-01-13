@@ -478,8 +478,6 @@ class MainWindow(QWidget):
     def _do_edit(self):
         if len(self.selected_ids) == 1:
             idea_id = list(self.selected_ids)[0]
-            status = self.service.get_lock_status([idea_id])
-            if status.get(idea_id, 0): return
             self._open_edit_dialog(idea_id=idea_id)
             
     def _open_edit_dialog(self, idea_id=None, category_id_for_new=None):

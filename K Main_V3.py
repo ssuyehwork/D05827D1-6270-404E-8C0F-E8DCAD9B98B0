@@ -123,7 +123,7 @@ class AppManager(QObject):
         # 连接全局信号
         app_signals.data_changed.connect(self.main_window._refresh_all)
         app_signals.data_changed.connect(self.quick_window._update_list)
-        app_signals.data_changed.connect(self.quick_window._update_partition_tree)
+        app_signals.data_changed.connect(self.quick_window.refresh_sidebar)
 
         # 注册全局热键 Alt+Space
         try:
