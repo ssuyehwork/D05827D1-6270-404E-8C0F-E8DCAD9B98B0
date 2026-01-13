@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ui/quick_window_parts/sidebar.py
+# ui/quick_window_parts/quick_sidebar.py
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, 
                              QMenu, QMessageBox, QInputDialog, QColorDialog, 

@@ -28,7 +28,7 @@ from core.settings import load_setting, save_setting
 from ui.utils import create_svg_icon, create_clear_button_icon
 from .quick_window_parts.widgets import DraggableListWidget
 from .quick_window_parts.toolbar import Toolbar
-from .quick_window_parts.sidebar import Sidebar
+from .quick_window_parts.quick_sidebar import Sidebar
 
 # ... (Platform specific imports) ...
 if sys.platform == "win32":
