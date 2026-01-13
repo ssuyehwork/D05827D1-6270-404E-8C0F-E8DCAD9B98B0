@@ -100,25 +100,52 @@ class IdeaService:
     # --- Clipboard Logic (Ported from db_manager) ---
     def add_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         hasher = hashlib.sha256()
-        if item_type == 'text' or item_type == 'file':
-            hasher.update(content.encode('utf-8'))
-        elif item_type == 'image' and data_blob:
+        
+        # 【逻辑优化】统一哈希计算
+        # 只要不是带 blob 的图片，都按 content 字符串计算哈希
+        # 这样 file, folder, py, pdf 等类型都能正确处理
+        if item_type == 'image' and data_blob:
             hasher.update(data_blob)
+        else:
+            # 确保 content 不为 None
+            safe_content = str(content) if content else ""
+            hasher.update(safe_content.encode('utf-8'))
+            
         content_hash = hasher.hexdigest()
 
         existing = self.idea_repo.find_by_hash(content_hash)
         if existing:
-            # 【修复】使用专门的时间戳更新方法
+            # 更新时间戳
             self.idea_repo.update_timestamp(existing[0])
             app_signals.data_changed.emit()
             return existing[0], False
         else:
-            if item_type == 'text': title = content.strip().split('\n')[0][:50]
-            elif item_type == 'image': title = "[图片]"
-            elif item_type == 'file': title = f"[文件] {os.path.basename(content.split(';')[0])}"
-            else: title = "未命名"
+            # 【标题生成逻辑修复】
+            if item_type == 'text':
+                title = content.strip().split('\n')[0][:50]
+            elif item_type == 'image':
+                title = "[图片]"
+            else:
+                # 通用文件处理：尝试从路径中提取文件名
+                # 覆盖 file, folder, py, pdf, files 等所有情况
+                try:
+                    # 获取第一个路径（处理多文件复制的情况）
+                    first_path = content.split(';')[0]
+                    # 去除可能存在的末尾斜杠（针对根目录文件夹）
+                    clean_path = first_path.rstrip('/\\')
+                    fname = os.path.basename(clean_path)
+                    
+                    if not fname: # 如果还是空的（例如只有盘符），直接用路径
+                        fname = first_path
+                        
+                    title = f"[{item_type}] {fname}"
+                except Exception:
+                    title = f"[{item_type}]" # 兜底
             
-            iid = self.idea_repo.add(title, content, COLORS['default_note'], category_id, item_type, data_blob, content_hash)
+            # 使用默认颜色
+            color = COLORS['default_note']
+            
+            iid = self.idea_repo.add(title, content, color, category_id, item_type, data_blob, content_hash)
             app_signals.data_changed.emit()
             return iid, True
 
@@ -175,7 +202,6 @@ class IdeaService:
         return self.category_repo.get_preset_tags(cat_id)
         
     def apply_preset_tags_to_category_items(self, cat_id, tags_list):
-        # 复杂逻辑：先找 idea ids，再加 tags
         c = self.idea_repo.db.get_cursor()
         c.execute('SELECT id FROM ideas WHERE category_id=? AND is_deleted=0', (cat_id,))
         ids = [r[0] for r in c.fetchall()]

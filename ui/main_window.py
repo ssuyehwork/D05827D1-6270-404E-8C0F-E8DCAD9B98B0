@@ -300,25 +300,26 @@ class MainWindow(QWidget):
         self.cards_cache.clear()
         
         # 1. 获取基础元数据（当前层级）
-        # 注意：这里我们首先获取当前选中分类的直接数据
         self.cached_metadata = self.service.get_metadata(self.header.search.text(), self.curr_filter[0], self.curr_filter[1])
         
-        # [新增] 递归逻辑
-        if self.is_recursive_mode and self.curr_filter[0] == 'category':
+        # [关键修复] 递归逻辑：必须确保当前选中的是具体分类（ID不为None），避免“未分类”显示所有内容
+        if self.is_recursive_mode and self.curr_filter[0] == 'category' and self.curr_filter[1] is not None:
             current_cat_id = self.curr_filter[1]
             all_categories = self.service.get_categories()
             
             # 获取所有子孙 ID
             descendant_ids = self._get_all_descendant_ids(current_cat_id, all_categories)
             
-            # 循环获取子孙分类的数据并合并 (为了不修改后端，在前端做循环聚合)
+            # 循环获取子孙分类的数据并合并
             for sub_id in descendant_ids:
                 sub_data = self.service.get_metadata(self.header.search.text(), 'category', sub_id)
                 self.cached_metadata.extend(sub_data)
         
-        # 2. 获取子文件夹（如果是分类视图）
+        # 2. 获取子文件夹
+        # [关键修复] 只有在浏览“具体分类”时才显示子文件夹。
+        # 如果是“未分类”（ID为None），坚决不加载顶级文件夹。
         self.current_sub_folders = []
-        if self.curr_filter[0] == 'category':
+        if self.curr_filter[0] == 'category' and self.curr_filter[1] is not None:
             current_cat_id = self.curr_filter[1]
             all_categories = self.service.get_categories() 
             all_counts = self.service.get_counts().get('categories', {})
@@ -391,12 +392,10 @@ class MainWindow(QWidget):
     def _on_folder_clicked(self, cat_id):
         """点击卡片区域的文件夹时，跳转到该分类"""
         self._set_filter('category', cat_id)
-        # 切换分类时，通常希望重置递归状态（或者保持，看个人喜好，这里选择重置为默认 false 以防混淆）
+        # 切换分类时，重置递归状态
         self.is_recursive_mode = False
         self.card_list_view.set_recursive_mode(False) 
 
-    # --- 后续代码保持不变 ---
-    
     def _on_filter_criteria_changed(self):
         self.current_page = 1
         self._apply_filters_and_render()
@@ -539,7 +538,6 @@ class MainWindow(QWidget):
         self.cards_cache.clear()
         self.card_list_view.clear_all()
         
-        # [修改] 切换大分类时重置递归模式，避免 confusion
         self.is_recursive_mode = False
         self.card_list_view.set_recursive_mode(False) 
         
@@ -640,8 +638,6 @@ class MainWindow(QWidget):
 
     def _move_to_category(self, cat_id):
         if not self.selected_ids: return
-        
-        # [新增] 更新最近使用的分类列表
         if cat_id is not None:
             recent_cats = load_setting('recent_categories', [])
             if cat_id in recent_cats: recent_cats.remove(cat_id)
@@ -739,15 +735,11 @@ class MainWindow(QWidget):
             menu.addSeparator()
             cat_menu = menu.addMenu(create_svg_icon('folder.svg', '#cccccc'), '移动到分类')
             
-            # [优化] 仅显示最近使用的 15 个分类
             recent_cats = load_setting('recent_categories', [])
             all_cats = {c['id']: c for c in self.service.get_categories()}
-            
-            # 添加固定的“未分类”选项
             action_uncategorized = cat_menu.addAction('⚠️ 未分类')
             action_uncategorized.triggered.connect(lambda: self._move_to_category(None))
 
-            # 添加最近使用且仍然存在的分类
             count = 0
             for cat_id in recent_cats:
                 if count >= 15: break
@@ -766,7 +758,6 @@ class MainWindow(QWidget):
         card = self.card_list_view.get_card(idea_id)
         if card: menu.exec_(card.mapToGlobal(pos))
 
-    # --- 窗口拖拽与调整大小逻辑 ---
     def _get_resize_area(self, pos):
         x, y = pos.x(), pos.y(); w, h = self.width(), self.height(); m = self.RESIZE_MARGIN
         areas = []
@@ -840,7 +831,6 @@ class MainWindow(QWidget):
         if hasattr(self, "sidebar"): save_setting("sidebar_width", self.sidebar.width())
 
     def refresh_logo(self):
-        """刷新标题栏 Logo"""
         self.header.refresh_logo()
 
     def save_state(self):
@@ -862,7 +852,6 @@ class MainWindow(QWidget):
         sw = load_setting("sidebar_width")
         if sw and hasattr(self, "main_splitter"): QTimer.singleShot(0, lambda: self.main_splitter.setSizes([int(sw), self.width()-int(sw)]))
 
-        # Restore metadata panel visibility
         if load_setting("metadata_panel_visible", False):
             self._show_metadata_panel()
 

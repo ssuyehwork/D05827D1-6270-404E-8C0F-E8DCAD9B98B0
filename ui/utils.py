@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import QApplication
 _icon_theme_colors = {
     'all_data.svg':      '#3498db',
     'today.svg':         '#2ecc71',
-    'uncategorized.svg': '#e67e22',
+    'uncategorized.svg': '#e67e22', # 保持原有的橙色，或者如果您喜欢图2的黄色，可以改为 '#FFC107'
     'untagged.svg':      '#95a5a6',
     'bookmark.svg':      '#ff6b81',
     'trash.svg':         '#e74c3c',
@@ -57,10 +57,21 @@ _system_icons = {
         <circle cx="17" cy="19" r="3"></circle>
     </svg>""",
 
-    # [核心] 未分类 (Inbox/收纳盒风格): 替代之前的文件夹样式
+    # [修改] 未分类: 根据您的要求，改为"问号+分支"结构
     'uncategorized.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline>
-        <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+        <!-- 左侧：问号 -->
+        <path d="M5 8 C5 4 10 4 10 8 C10 11 7 12 7 14" />
+        <circle cx="7" cy="19" r="1" fill="currentColor" stroke="none"/>
+        
+        <!-- 右侧：分支结构 (E型) -->
+        <path d="M14 5 v14" /> <!-- 竖线 -->
+        
+        <!-- 上分支 -->
+        <path d="M14 6 h3" /> <circle cx="20" cy="6" r="2" />
+        <!-- 中分支 -->
+        <path d="M14 12 h3" /> <circle cx="20" cy="12" r="2" />
+        <!-- 下分支 -->
+        <path d="M14 18 h3" /> <circle cx="20" cy="18" r="2" />
     </svg>""",
 
     # [兼容] 如果有代码还在调用 folder.svg，强制指向分支样式，彻底消灭文件夹图标
