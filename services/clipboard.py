@@ -5,6 +5,8 @@ import os
 import uuid
 import hashlib
 import logging
+import zipfile
+import io
 from PyQt5.QtCore import QObject, pyqtSignal, QBuffer
 from PyQt5.QtGui import QImage
 from PyQt5.QtWidgets import QApplication
@@ -33,6 +35,28 @@ class ClipboardManager(QObject):
         except Exception as e:
             logging.error(f"Failed to hash data: {e}", exc_info=True)
             return None
+
+    def _create_zip_in_memory(self, filepaths):
+        """将文件列表打包成内存中的zip文件，并增加错误处理。"""
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for filepath in filepaths:
+                try:
+                    if os.path.isfile(filepath):
+                        zf.write(filepath, os.path.basename(filepath))
+                    elif os.path.isdir(filepath):
+                        for root, _, files in os.walk(filepath):
+                            for file in files:
+                                full_path = os.path.join(root, file)
+                                try:
+                                    arcname = os.path.relpath(full_path, os.path.dirname(filepath))
+                                    zf.write(full_path, arcname)
+                                except Exception as e:
+                                    logging.warning(f"Could not add file to zip: {full_path}, error: {e}")
+                except Exception as e:
+                    logging.warning(f"Could not process path: {filepath}, error: {e}")
+        zip_buffer.seek(0)
+        return zip_buffer.getvalue()
 
     def process_clipboard(self, mime_data, category_id=None):
         """
@@ -92,8 +116,11 @@ class ClipboardManager(QObject):
                             detected_type = 'files' # 多种类型混合
                         
                         try:
+                            # 将文件打包成zip
+                            zip_data = self._create_zip_in_memory(filepaths)
+
                             # 将 detected_type 传入 item_type
-                            result = self.db.add_clipboard_item(item_type=detected_type, content=content, category_id=category_id)
+                            result = self.db.add_clipboard_item(item_type=detected_type, content=content, data_blob=zip_data, category_id=category_id)
                             self._last_hash = current_hash
                             
                             if result:

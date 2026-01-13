@@ -232,15 +232,13 @@ class DatabaseManager:
 
     def add_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         c = self.conn.cursor()
-        c = self.conn.cursor()
         hasher = hashlib.sha256()
         
-        # 【逻辑修正】除去明确的image类型外，其他所有类型(text, pdf, folder...)都按内容字符hash
-        if item_type == 'image' and data_blob:
+        # 优先使用二进制数据生成哈希，否则使用文本内容
+        if data_blob:
             hasher.update(data_blob)
         else:
             hasher.update(content.encode('utf-8'))
-            
         content_hash = hasher.hexdigest()
 
         c.execute("SELECT id FROM ideas WHERE content_hash = ?", (content_hash,))
@@ -252,20 +250,18 @@ class DatabaseManager:
             self.conn.commit()
             return idea_id, False 
         else:
-            # 【逻辑修正】标题生成逻辑
+            # 标题生成逻辑
             if item_type == 'text':
                 title = content.strip().split('\n')[0][:50]
             elif item_type == 'image':
                 title = "[图片]"
-            else:
-                # 其他所有类型（file, pdf, folder...）均视为文件类，显示文件名
-                # 尝试从内容中获取第一个文件名
-                try:
-                    first_file = content.split(';')[0]
-                    fname = os.path.basename(first_file)
-                    title = f"[{item_type}] {fname}"
-                except:
-                    title = f"[{item_type}]"
+            else: # 文件、文件夹等
+                filepaths = content.split(';')
+                filenames = [os.path.basename(fp) for fp in filepaths]
+                if len(filenames) > 2:
+                    title = f"[{item_type}] {filenames[0]}, {filenames[1]} (+{len(filenames)-2} more)"
+                else:
+                    title = f"[{item_type}] {', '.join(filenames)}"
 
             default_color = COLORS['default_note']
             c.execute(

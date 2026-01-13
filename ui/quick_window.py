@@ -10,6 +10,10 @@ import datetime
 import subprocess
 import logging
 import math
+import zipfile
+import io
+import tempfile
+import shutil
 
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QListWidget, QLineEdit, 
                              QListWidgetItem, QHBoxLayout, QTreeWidget, QTreeWidgetItem, 
@@ -1063,40 +1067,89 @@ class QuickWindow(QWidget):
     def _on_item_activated(self, item):
         item_tuple = item.data(Qt.UserRole)
         if not item_tuple: return
-        try:
-            clipboard = QApplication.clipboard(); item_type = item_tuple['item_type'] or 'text'
-            if item_type == 'image':
-                if item_tuple['data_blob']:
-                    image = QImage(); image.loadFromData(item_tuple['data_blob']); clipboard.setImage(image)
-            elif item_type != 'text':
-                if item_tuple['content']:
-                    mime_data = QMimeData(); mime_data.setUrls([QUrl.fromLocalFile(p) for p in item_tuple['content'].split(';') if p])
-                    clipboard.setMimeData(mime_data)
-            else:
-                if item_tuple['content']: clipboard.setText(item_tuple['content'])
-            self._paste_ditto_style()
-        except Exception as e: log(f"❌ 粘贴操作失败: {e}")
 
-    def _paste_ditto_style(self):
-        if not user32: return
-        target_win = self.last_active_hwnd; target_focus = self.last_focus_hwnd; target_thread = self.last_thread_id
-        if not target_win or not user32.IsWindow(target_win): return
-        
-        curr_thread = kernel32.GetCurrentThreadId(); attached = False
-        if target_thread and curr_thread != target_thread: attached = user32.AttachThreadInput(curr_thread, target_thread, True)
-        
+        temp_dir_to_clean = None  # 用于存储临时目录路径
         try:
-            if user32.IsIconic(target_win): user32.ShowWindow(target_win, 9)
+            clipboard = QApplication.clipboard()
+            item_type = item_tuple['item_type'] or 'text'
+            idea_id = item_tuple['id']
+
+            full_item_data = self.db.get_idea(idea_id, include_blob=True)
+            if not full_item_data: return
+
+            data_blob = full_item_data['data_blob']
+
+            if item_type == 'image':
+                if data_blob:
+                    image = QImage()
+                    image.loadFromData(data_blob)
+                    clipboard.setImage(image)
+            elif item_type not in ['text', 'image']:
+                if data_blob:
+                    temp_dir_to_clean = tempfile.mkdtemp()
+                    zip_buffer = io.BytesIO(data_blob)
+                    with zipfile.ZipFile(zip_buffer, 'r') as zf:
+                        zf.extractall(temp_dir_to_clean)
+
+                    extracted_paths = [os.path.join(temp_dir_to_clean, name) for name in zf.namelist()]
+
+                    mime_data = QMimeData()
+                    mime_data.setUrls([QUrl.fromLocalFile(p) for p in extracted_paths])
+                    clipboard.setMimeData(mime_data)
+                else:
+                    if full_item_data['content']:
+                        mime_data = QMimeData()
+                        mime_data.setUrls([QUrl.fromLocalFile(p) for p in full_item_data['content'].split(';') if p])
+                        clipboard.setMimeData(mime_data)
+            else:
+                if full_item_data['content']:
+                    clipboard.setText(full_item_data['content'])
+
+            self._paste_ditto_style(temp_dir_to_clean)
+        except Exception as e:
+            log(f"❌ 粘贴操作失败: {e}")
+            if temp_dir_to_clean:
+                shutil.rmtree(temp_dir_to_clean, ignore_errors=True)
+
+    def _paste_ditto_style(self, temp_dir_to_clean=None):
+        if not user32:
+            if temp_dir_to_clean:
+                shutil.rmtree(temp_dir_to_clean, ignore_errors=True)
+            return
+
+        target_win = self.last_active_hwnd
+        target_thread = self.last_thread_id
+        if not target_win or not user32.IsWindow(target_win):
+            if temp_dir_to_clean:
+                shutil.rmtree(temp_dir_to_clean, ignore_errors=True)
+            return
+
+        curr_thread = kernel32.GetCurrentThreadId()
+        attached = False
+        try:
+            if target_thread and curr_thread != target_thread:
+                attached = user32.AttachThreadInput(curr_thread, target_thread, True)
+
+            if user32.IsIconic(target_win):
+                user32.ShowWindow(target_win, 9) # SW_RESTORE
             user32.SetForegroundWindow(target_win)
             
-            if target_focus and user32.IsWindow(target_focus): user32.SetFocus(target_focus)
+            target_focus = self.last_focus_hwnd
+            if target_focus and user32.IsWindow(target_focus):
+                user32.SetFocus(target_focus)
             
             time.sleep(0.1)
-            user32.keybd_event(VK_CONTROL, 0, 0, 0); user32.keybd_event(VK_V, 0, 0, 0)
-            user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0); user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-        except Exception as e: log(f"❌ 粘贴异常: {e}")
+            user32.keybd_event(VK_CONTROL, 0, 0, 0)
+            user32.keybd_event(VK_V, 0, 0, 0)
+            user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+            user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+        except Exception as e:
+            log(f"❌ 粘贴异常: {e}")
         finally:
-            if attached: user32.AttachThreadInput(curr_thread, target_thread, False)
+            if attached:
+                user32.AttachThreadInput(curr_thread, target_thread, False)
+            if temp_dir_to_clean:
+                QTimer.singleShot(500, lambda: shutil.rmtree(temp_dir_to_clean, ignore_errors=True))
 
     def _request_new_data_from_sidebar(self, cat_id):
         dialog = EditDialog(self.db, category_id_for_new=cat_id, parent=None)
