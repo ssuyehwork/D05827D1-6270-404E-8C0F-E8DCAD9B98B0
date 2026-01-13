@@ -33,6 +33,7 @@ class DropTreeWidget(QTreeWidget):
         self.setHeaderHidden(True)
         self.setIndentation(16)
         self.setFocusPolicy(Qt.NoFocus)
+        self.setFrameShape(QFrame.NoFrame) 
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
@@ -113,14 +114,15 @@ class Sidebar(QWidget):
         
         # 1. 系统树
         self.system_tree = DropTreeWidget()
-        # [调整] 6行 * 25px = 150px，严丝合缝
-        self.system_tree.setFixedHeight(150) 
+        # [修改] 移除初始化时的硬编码高度，高度将在 refresh_sync 中根据实际条目数动态设置
+        self.system_tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.system_tree.setDragEnabled(False) 
         
         # 2. 分区树
         self.partition_tree = DropTreeWidget()
         
-        # --- 样式调整 ---
+        # --- 样式 ---
+        # 确保行高固定为 25px，以便精确计算总高度
         common_style = f"""
             QTreeWidget {{
                 background-color: {COLORS['bg_mid']};
@@ -156,8 +158,12 @@ class Sidebar(QWidget):
         
         layout.addWidget(self.system_tree)
         
-        # [移除] 移除了之前的 QFrame 分割线
-        # 两个 TreeWidget 现在直接紧挨着，视觉上完全连贯
+        # 分割线
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("background-color: #1e1e1e; border: none; min-height: 2px; max-height: 2px;")
+        layout.addWidget(line)
         
         layout.addWidget(self.partition_tree)
 
@@ -191,7 +197,7 @@ class Sidebar(QWidget):
             self.partition_tree.clear()
             counts = self.db.get_counts()
             
-            # 系统项
+            # 系统项列表
             sys_items = [
                 ("全部数据", 'all', 'all_data.svg'),
                 ("今日数据", 'today', 'today.svg'),
@@ -200,6 +206,10 @@ class Sidebar(QWidget):
                 ("书签", 'bookmark', 'bookmark.svg'),
                 ("回收站", 'trash', 'trash.svg')
             ]
+            
+            # [关键修复] 动态计算高度：条目数量 * 单行高度(25px)
+            # 无论列表里有几个项目，高度都自动匹配，绝不会有空隙
+            self.system_tree.setFixedHeight(len(sys_items) * 25)
             
             for label, key, icon in sys_items:
                 data = {'type': key, 'id': None}
