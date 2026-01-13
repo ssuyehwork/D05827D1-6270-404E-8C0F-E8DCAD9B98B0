@@ -237,6 +237,7 @@ class QuickWindow(QWidget):
         self.toolbar.prev_page_requested.connect(self._prev_page)
         self.toolbar.next_page_requested.connect(self._next_page)
         self.toolbar.jump_to_page_requested.connect(self._jump_to_page_from_toolbar)
+        self.toolbar.refresh_requested.connect(self.sidebar.refresh_ui)
 
         self.sidebar.refresh_ui()
         self._update_list()

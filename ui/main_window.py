@@ -118,6 +118,7 @@ class MainWindow(QWidget):
         self.sidebar.data_changed.connect(self._load_data)
         self.sidebar.new_data_requested.connect(self._on_new_data_in_category_requested)
         self.sidebar.items_moved.connect(self._handle_items_moved)
+        self.header.refresh_requested.connect(self.sidebar.refresh)
         self.sidebar.setMinimumWidth(200)
         
         # 中间卡片区 (包含操作栏)

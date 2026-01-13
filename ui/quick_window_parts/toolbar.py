@@ -17,6 +17,7 @@ class Toolbar(QWidget):
     prev_page_requested = pyqtSignal()
     next_page_requested = pyqtSignal()
     jump_to_page_requested = pyqtSignal(int)
+    refresh_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,6 +51,10 @@ class Toolbar(QWidget):
 
         self.btn_toggle_side = self._create_button('action_eye.svg', '#aaa', "ToolButton", "显示/隐藏侧边栏", self.toggle_sidebar_requested.emit)
         layout.addWidget(self.btn_toggle_side)
+
+        # Add refresh button
+        self.btn_refresh = self._create_button('action_restore.svg', '#aaa', "ToolButton", "刷新 (F5)", self.refresh_requested.emit)
+        layout.addWidget(self.btn_refresh)
 
         layout.addSpacing(10)
 

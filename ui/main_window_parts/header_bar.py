@@ -21,6 +21,7 @@ class HeaderBar(QWidget):
     toggle_filter = pyqtSignal()
     toggle_metadata = pyqtSignal(bool)
     new_idea_requested = pyqtSignal()
+    refresh_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -120,6 +121,12 @@ class HeaderBar(QWidget):
         layout.addWidget(self.total_page_label); layout.addSpacing(10)
         layout.addWidget(self.btn_next); layout.addSpacing(6)
         layout.addWidget(self.btn_last)
+        layout.addSpacing(10)
+
+        # Refresh button
+        refresh_btn = self._create_btn('action_restore.svg', "刷新 (F5)", page_btn_style)
+        refresh_btn.clicked.connect(self.refresh_requested.emit)
+        layout.addWidget(refresh_btn)
 
         layout.addStretch()
 
