@@ -113,64 +113,67 @@ class Sidebar(QWidget):
         return QIcon(pixmap)
 
     def _update_partition_tree(self):
+        # 1. 在清空列表前，先保存当前选中项的数据，而不是引用
+        selected_data = None
         current_sys_item = self.system_tree.currentItem()
         current_user_item = self.partition_tree.currentItem()
+        if current_user_item:
+            selected_data = current_user_item.data(0, Qt.UserRole)
+        elif current_sys_item:
+            selected_data = current_sys_item.data(0, Qt.UserRole)
 
-        # 1. Update system tree
+        # 2. 清空并重新填充列表
         self.system_tree.clear()
+        self.partition_tree.clear()
+
         counts = self.db.get_counts()
         
+        # 填充系统树
         static_items = [
-            ("全部数据", 'all', 'all_data.svg'), 
-            ("今日数据", 'today', 'today.svg'), 
-            ("未分类", 'uncategorized', 'uncategorized.svg'), 
-            ("未标签", 'untagged', 'untagged.svg'), 
-            ("书签", 'bookmark', 'bookmark.svg'), 
-            ("回收站", 'trash', 'trash.svg')
+            ("全部数据", 'all', 'all_data.svg'), ("今日数据", 'today', 'today.svg'),
+            ("未分类", 'uncategorized', 'uncategorized.svg'), ("未标签", 'untagged', 'untagged.svg'),
+            ("书签", 'bookmark', 'bookmark.svg'), ("回收站", 'trash', 'trash.svg')
         ]
-        
         for name, key, icon_filename in static_items:
-            data = {'type': key, 'id': None}
-            id_map = {'all': -1, 'today': -5, 'uncategorized': -15, 'untagged': -16, 'bookmark': -20, 'trash': -30}
-            if key in id_map: data['id'] = id_map[key]
-            
+            data = {'type': key, 'id': {'all': -1, 'today': -5, 'uncategorized': -15, 'untagged': -16, 'bookmark': -20, 'trash': -30}.get(key)}
             item = QTreeWidgetItem(self.system_tree, [f"{name} ({counts.get(key, 0)})"])
             item.setData(0, Qt.UserRole, data)
             item.setIcon(0, create_svg_icon(icon_filename))
             item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
 
-        # 2. Update user partition tree
-        self.partition_tree.clear()
+        # 填充用户分区树
         partition_counts = counts.get('categories', {})
-        
         user_partitions_root = QTreeWidgetItem(self.partition_tree, ["我的分区"])
         user_partitions_root.setIcon(0, create_svg_icon("branch.svg", "white"))
         user_partitions_root.setFlags(Qt.ItemIsEnabled | Qt.ItemIsDropEnabled)
-        font = user_partitions_root.font(0)
-        font.setBold(True)
-        user_partitions_root.setFont(0, font)
+        font = user_partitions_root.font(0); font.setBold(True); user_partitions_root.setFont(0, font)
         user_partitions_root.setForeground(0, QColor("#FFFFFF"))
-            
         self._add_partition_recursive(self.db.get_partitions_tree(), user_partitions_root, partition_counts)
         self.partition_tree.expandAll()
         
-        # Restore selection
-        if current_user_item and current_user_item.data(0, Qt.UserRole):
-             self.select_item_by_data(self.partition_tree, current_user_item.data(0, Qt.UserRole))
-        elif current_sys_item and current_sys_item.data(0, Qt.UserRole):
-             self.select_item_by_data(self.system_tree, current_sys_item.data(0, Qt.UserRole))
-        elif self.system_tree.topLevelItemCount() > 0:
+        # 3. 使用保存的数据来恢复选中状态
+        restored = False
+        if selected_data:
+            if self.select_item_by_data(self.partition_tree, selected_data):
+                restored = True
+            elif self.select_item_by_data(self.system_tree, selected_data):
+                restored = True
+
+        # 4. 如果没有恢复成功，则默认选中第一项
+        if not restored and self.system_tree.topLevelItemCount() > 0:
             self.system_tree.setCurrentItem(self.system_tree.topLevelItem(0))
 
     def select_item_by_data(self, tree, data_to_match):
+        if not data_to_match: return False
         it = QTreeWidgetItemIterator(tree)
         while it.value():
             item = it.value()
             item_data = item.data(0, Qt.UserRole)
             if item_data and item_data.get('id') == data_to_match.get('id') and item_data.get('type') == data_to_match.get('type'):
                 tree.setCurrentItem(item)
-                break
+                return True # 表示成功找到并选中
             it += 1
+        return False # 表示未找到
             
     def _add_partition_recursive(self, partitions, parent_item, partition_counts):
         for partition in partitions:
