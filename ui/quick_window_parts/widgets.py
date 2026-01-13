@@ -60,7 +60,6 @@ class DropTreeWidget(QTreeWidget):
                 if item.flags() & Qt.ItemIsDropEnabled:
                     # 额外检查：如果是 user root 或者是具体分类
                     if data and data.get('type') in ['partition', 'favorite', 'trash', 'uncategorized']:
-                        self.setCurrentItem(item)
                         event.accept()
                         return
             event.ignore()
