@@ -114,6 +114,7 @@ class Sidebar(QWidget):
         
         # 1. 系统树
         self.system_tree = DropTreeWidget()
+        # 高度动态计算
         self.system_tree.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.system_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.system_tree.setDragEnabled(False) 
@@ -135,6 +136,7 @@ class Sidebar(QWidget):
                 height: 25px;
                 padding-left: 4px;
                 border: none;
+                border-bottom: 1px solid #2A2A2A; 
                 margin: 0px; 
             }}
             QTreeWidget::item:hover {{
@@ -143,6 +145,7 @@ class Sidebar(QWidget):
             QTreeWidget::item:selected {{
                 background-color: #37373d;
                 color: white;
+                border-bottom: 1px solid #2A2A2A;
             }}
             QScrollBar:vertical {{ border: none; background: transparent; width: 6px; margin: 0px; }}
             QScrollBar::handle:vertical {{ background: #444; border-radius: 3px; min-height: 20px; }}
@@ -196,12 +199,11 @@ class Sidebar(QWidget):
                 ("回收站", 'trash', 'trash.svg')
             ]
             
-            # 精确计算高度并彻底禁用滚动
+            # 动态计算高度
             item_height = 25
             total_height = len(sys_items) * item_height
             self.system_tree.setFixedHeight(total_height)
-            self.system_tree.setMinimumHeight(total_height)
-            self.system_tree.setMaximumHeight(total_height)
+            self.system_tree.verticalScrollBar().setRange(0, 0)
             
             for label, key, icon in sys_items:
                 data = {'type': key, 'id': None}
@@ -210,10 +212,6 @@ class Sidebar(QWidget):
                 item.setIcon(0, create_svg_icon(icon))
                 item.setData(0, Qt.UserRole, data)
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDropEnabled)
-            
-            # 彻底禁用系统树的滚动
-            self.system_tree.verticalScrollBar().setRange(0, 0)
-            self.system_tree.verticalScrollBar().setEnabled(False)
             
             # 用户分区
             user_root = QTreeWidgetItem(self.partition_tree, ["我的分区"])
@@ -346,6 +344,10 @@ class Sidebar(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_dark']}; color: white; border: 1px solid #444; }} QMenu::item {{ padding: 6px 20px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }}")
 
+        # [功能] 刷新
+        menu.addAction('刷新', self.refresh)
+        menu.addSeparator()
+
         if not item or item.text(0) == "我的分区":
             menu.addAction('➕ 新建分组', self._new_group)
             menu.exec_(sender_tree.mapToGlobal(pos))
@@ -363,6 +365,8 @@ class Sidebar(QWidget):
             menu.addAction('新建灵感', lambda: self.new_data_requested.emit(cat_id))
             menu.addSeparator()
             menu.addAction('设置颜色', lambda: self._change_color(cat_id))
+            # [功能] 找回随机颜色
+            menu.addAction('随机颜色', lambda: self._set_random_color(cat_id))
             menu.addAction('设置预设标签', lambda: self._set_preset_tags(cat_id))
             menu.addSeparator()
             menu.addAction('新建分组', self._new_group)
@@ -400,6 +404,21 @@ class Sidebar(QWidget):
             self.db.set_category_color(cat_id, color.name())
             self.refresh(); self.data_changed.emit()
 
+    # [功能] 随机颜色实现
+    def _set_random_color(self, cat_id):
+        r = random.randint(0, 255)
+        g = random.randint(0, 255)
+        b = random.randint(0, 255)
+        color = QColor(r, g, b)
+        # 确保颜色不太亮，适合暗色主题
+        while color.lightness() < 80: 
+            r = random.randint(0, 255); g = random.randint(0, 255); b = random.randint(0, 255)
+            color = QColor(r, g, b)
+        
+        self.db.set_category_color(cat_id, color.name())
+        self.refresh()
+        self.data_changed.emit()
+
     def _set_preset_tags(self, cat_id):
         current = self.db.get_category_preset_tags(cat_id)
         dlg = QDialog(self)
@@ -421,6 +440,7 @@ class Sidebar(QWidget):
         if dlg.exec_() == QDialog.Accepted:
             self.db.set_category_preset_tags(cat_id, inp.text().strip()); self.data_changed.emit()
             
+    # [功能] 补全辅助方法
     def get_current_selection_color(self):
         item = self.partition_tree.currentItem()
         if item:

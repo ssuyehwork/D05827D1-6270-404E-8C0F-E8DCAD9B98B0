@@ -74,9 +74,24 @@ class IdeaService:
         app_signals.data_changed.emit()
 
     def move_category(self, iid, cat_id, emit_signal=True):
+        """
+        移动笔记到指定分类，并自动应用该分类的颜色。
+        """
         self.idea_repo.update_field(iid, 'category_id', cat_id)
         self.idea_repo.update_field(iid, 'is_deleted', 0)
-        # 如果移动到分类，应应用分类颜色（略）
+        
+        # [关键修复] 自动同步颜色
+        if cat_id is not None:
+            # 查询目标分类的颜色
+            c = self.idea_repo.db.get_cursor()
+            c.execute('SELECT color FROM categories WHERE id=?', (cat_id,))
+            row = c.fetchone()
+            if row and row[0]:
+                self.idea_repo.update_field(iid, 'color', row[0])
+        else:
+            # 移回未分类，恢复为默认的未分类颜色
+            self.idea_repo.update_field(iid, 'color', COLORS['uncategorized'])
+
         if emit_signal:
             app_signals.data_changed.emit()
 
@@ -101,13 +116,9 @@ class IdeaService:
     def add_clipboard_item(self, item_type, content, data_blob=None, category_id=None):
         hasher = hashlib.sha256()
         
-        # 【逻辑优化】统一哈希计算
-        # 只要不是带 blob 的图片，都按 content 字符串计算哈希
-        # 这样 file, folder, py, pdf 等类型都能正确处理
         if item_type == 'image' and data_blob:
             hasher.update(data_blob)
         else:
-            # 确保 content 不为 None
             safe_content = str(content) if content else ""
             hasher.update(safe_content.encode('utf-8'))
             
@@ -115,35 +126,32 @@ class IdeaService:
 
         existing = self.idea_repo.find_by_hash(content_hash)
         if existing:
-            # 更新时间戳
             self.idea_repo.update_timestamp(existing[0])
             app_signals.data_changed.emit()
             return existing[0], False
         else:
-            # 【标题生成逻辑修复】
             if item_type == 'text':
                 title = content.strip().split('\n')[0][:50]
             elif item_type == 'image':
                 title = "[图片]"
             else:
-                # 通用文件处理：尝试从路径中提取文件名
-                # 覆盖 file, folder, py, pdf, files 等所有情况
                 try:
-                    # 获取第一个路径（处理多文件复制的情况）
                     first_path = content.split(';')[0]
-                    # 去除可能存在的末尾斜杠（针对根目录文件夹）
                     clean_path = first_path.rstrip('/\\')
                     fname = os.path.basename(clean_path)
-                    
-                    if not fname: # 如果还是空的（例如只有盘符），直接用路径
-                        fname = first_path
-                        
+                    if not fname: fname = first_path
                     title = f"[{item_type}] {fname}"
                 except Exception:
-                    title = f"[{item_type}]" # 兜底
+                    title = f"[{item_type}]"
             
-            # 使用默认颜色
+            # 如果有传入分类ID，尝试使用分类颜色，否则用默认
             color = COLORS['default_note']
+            if category_id:
+                c = self.idea_repo.db.get_cursor()
+                c.execute('SELECT color FROM categories WHERE id=?', (category_id,))
+                row = c.fetchone()
+                if row and row[0]:
+                    color = row[0]
             
             iid = self.idea_repo.add(title, content, color, category_id, item_type, data_blob, content_hash)
             app_signals.data_changed.emit()

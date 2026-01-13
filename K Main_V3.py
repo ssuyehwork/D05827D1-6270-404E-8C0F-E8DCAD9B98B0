@@ -4,18 +4,19 @@ import time
 import logging
 import traceback
 import keyboard
-from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QDialog
+from PyQt5.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 
-# 导入 Container 和 Views
+# 导入核心组件
 from core.container import AppContainer
 from core.signals import app_signals
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
 from ui.ball import FloatingBall
 from core.settings import load_setting
+from ui.utils import create_svg_icon
 
 SERVER_NAME = "K_KUAIJIBIJI_SINGLE_INSTANCE_SERVER"
 
@@ -37,7 +38,6 @@ class AppManager(QObject):
         super().__init__()
         self.app = app
         
-        # 1. 初始化容器并获取 Service
         self.container = AppContainer()
         self.service = self.container.service
         
@@ -46,21 +46,49 @@ class AppManager(QObject):
         self.ball = None
         self.tray_icon = None
         
-        # 全局热键信号
         self.hotkey_signal = HotkeySignal()
         self.hotkey_signal.activated.connect(self.toggle_quick_window)
 
     def start(self):
-        # 2. 注入 Service 到 UI 组件
+        # 注入 Service
         self.main_window = MainWindow(self.service) 
         self.main_window.closing.connect(self.on_main_window_closing)
 
         self.ball = FloatingBall(self.main_window)
+        self._setup_ball_menu()
+        self._restore_ball_position()
+        self.ball.show()
+
+        self.quick_window = QuickWindow(self.service) 
+        self.quick_window.toggle_main_window_requested.connect(self.toggle_main_window)
         
-        # 悬浮球菜单逻辑
+        self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
+        
+        self._init_tray_icon()
+        
+        # --- [核心修复] 信号同步网络 ---
+        # 1. 监听全局信号 -> 刷新所有窗口
+        app_signals.data_changed.connect(self.main_window._refresh_all)
+        app_signals.data_changed.connect(self.quick_window._update_list)
+        app_signals.data_changed.connect(self.quick_window.refresh_sidebar)
+        
+        # 2. 监听侧边栏局部信号 -> 触发全局信号
+        # 这样，当你在 MainWindow 修改分类时，QuickWindow 也会收到通知
+        self.main_window.sidebar.data_changed.connect(app_signals.data_changed.emit)
+        self.quick_window.sidebar.data_changed.connect(app_signals.data_changed.emit)
+
+        # 注册全局热键 Alt+Space
+        try:
+            keyboard.add_hotkey('alt+space', self._on_hotkey_triggered, suppress=False)
+            logging.info("Global hotkey Alt+Space registered successfully")
+        except Exception as e:
+            logging.error(f"Failed to register hotkey Alt+Space: {e}", exc_info=True)
+
+        self.show_quick_window()
+
+    def _setup_ball_menu(self):
         original_context_menu = self.ball.contextMenuEvent
         def enhanced_context_menu(e):
-            from ui.utils import create_svg_icon
             m = QMenu(self.ball)
             m.setStyleSheet("""
                 QMenu { 
@@ -104,35 +132,14 @@ class AppManager(QObject):
         self.ball.double_clicked.connect(self.show_quick_window)
         self.ball.request_show_main_window.connect(self.show_main_window)
         self.ball.request_quit_app.connect(self.quit_application)
-        
+
+    def _restore_ball_position(self):
         ball_pos = load_setting('floating_ball_pos')
         if ball_pos and isinstance(ball_pos, dict) and 'x' in ball_pos and 'y' in ball_pos:
             self.ball.move(ball_pos['x'], ball_pos['y'])
         else:
             g = QApplication.desktop().screenGeometry()
             self.ball.move(g.width()-80, g.height()//2)
-        self.ball.show()
-
-        self.quick_window = QuickWindow(self.service) 
-        self.quick_window.toggle_main_window_requested.connect(self.toggle_main_window)
-        
-        self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
-        
-        self._init_tray_icon()
-        
-        # 连接全局信号
-        app_signals.data_changed.connect(self.main_window._refresh_all)
-        app_signals.data_changed.connect(self.quick_window._update_list)
-        app_signals.data_changed.connect(self.quick_window.refresh_sidebar)
-
-        # 注册全局热键 Alt+Space
-        try:
-            keyboard.add_hotkey('alt+space', self._on_hotkey_triggered, suppress=False)
-            logging.info("Global hotkey Alt+Space registered successfully")
-        except Exception as e:
-            logging.error(f"Failed to register hotkey Alt+Space: {e}", exc_info=True)
-
-        self.show_quick_window()
 
     def _on_hotkey_triggered(self):
         self.hotkey_signal.activated.emit()
@@ -189,26 +196,15 @@ class AppManager(QObject):
         if self.main_window: self.main_window.hide()
     def quit_application(self):
         logging.info("Application quit requested")
-        try:
-            keyboard.unhook_all()
-            logging.debug("Keyboard hooks removed")
-        except Exception as e:
-            logging.error(f"Failed to unhook keyboard: {e}", exc_info=True)
+        try: keyboard.unhook_all()
+        except: pass
         
         if self.quick_window:
-            try:
-                self.quick_window.save_state()
-                logging.debug("Quick window state saved")
-            except Exception as e:
-                logging.error(f"Failed to save quick window state: {e}", exc_info=True)
-        
+            try: self.quick_window.save_state()
+            except: pass
         if self.main_window:
-            try:
-                self.main_window.save_state()
-                logging.debug("Main window state saved")
-            except Exception as e:
-                logging.error(f"Failed to save main window state: {e}", exc_info=True)
-        
+            try: self.main_window.save_state()
+            except: pass
         self.app.quit()
 
 def main():
@@ -219,9 +215,7 @@ def main():
         socket.disconnectFromServer(); time.sleep(0.5)
     QLocalServer.removeServer(SERVER_NAME)
     server = QLocalServer(); server.listen(SERVER_NAME)
-    
     manager = AppManager(app)
-    
     def handle_new_connection():
         conn = server.nextPendingConnection()
         if conn and conn.waitForReadyRead(500):
@@ -229,7 +223,6 @@ def main():
             if msg == 'SHOW': manager.show_quick_window()
             elif msg == 'EXIT': manager.quit_application()
     server.newConnection.connect(handle_new_connection)
-    
     manager.start()
     sys.exit(app.exec_())
 

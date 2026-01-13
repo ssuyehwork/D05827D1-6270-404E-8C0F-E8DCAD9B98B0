@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # ui/quick_window_parts/quick_sidebar.py
 
+import logging
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, 
                              QAbstractItemView, QMenu, QColorDialog, QInputDialog, 
                              QMessageBox, QDialog, QLabel, QLineEdit, QPushButton, QHBoxLayout,
@@ -276,14 +277,12 @@ class Sidebar(QWidget):
         
         item = sender.itemAt(pos)
         menu = QMenu(self)
-        # [关键修复] 设置完整的样式表，包含 selected 状态
-        menu.setStyleSheet("""
-            QMenu { background-color: #2D2D2D; color: #EEE; border: 1px solid #444; border-radius: 4px; padding: 4px; }
-            QMenu::item { padding: 6px 20px; border-radius: 3px; }
-            QMenu::item:selected { background-color: #4a90e2; color: white; }
-            QMenu::separator { background-color: #444; height: 1px; margin: 4px 0px; }
-        """)
+        menu.setStyleSheet(f"QMenu {{ background-color: {COLORS.get('bg_dark', '#2d2d2d')}; color: white; border: 1px solid #444; }} QMenu::item {{ padding: 6px 20px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }}")
         
+        # [新增] 刷新
+        menu.addAction('刷新', self.refresh_ui)
+        menu.addSeparator()
+
         if not item or item.text(0) == "我的分区":
              menu.addAction('➕ 新建分组', self._new_group)
         else:
@@ -330,7 +329,16 @@ class Sidebar(QWidget):
             self.data_changed.emit()
 
     def _del_category(self, cid):
-        if QMessageBox.Yes == QMessageBox.question(self, '确认删除', '确认删除此分类?'):
+        c = self.db.conn.cursor()
+        c.execute("SELECT COUNT(*) FROM categories WHERE parent_id = ?", (cid,))
+        child_count = c.fetchone()[0]
+        msg = '确认删除此分类? (其中的内容将移至未分类)'
+        if child_count > 0: msg = f'此组包含 {child_count} 个区，确认一并删除?\n(所有内容都将移至未分类)'
+        
+        if QMessageBox.Yes == QMessageBox.question(self, '确认删除', msg):
+            c.execute("SELECT id FROM categories WHERE parent_id = ?", (cid,))
+            child_ids = [row[0] for row in c.fetchall()]
+            for child_id in child_ids: self.db.delete_category(child_id)
             self.db.delete_category(cid)
             self.data_changed.emit()
 
@@ -341,6 +349,7 @@ class Sidebar(QWidget):
             self.data_changed.emit()
 
     def _set_preset_tags(self, cat_id):
+        from PyQt5.QtWidgets import QLineEdit # Local import to avoid circular dependency if moved
         current_tags = self.db.get_category_preset_tags(cat_id)
         dlg = QDialog(self)
         dlg.setWindowTitle("设置预设标签")
@@ -348,9 +357,15 @@ class Sidebar(QWidget):
         dlg.setFixedSize(350, 150)
         
         layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel("拖入该分类时自动绑定以下标签："))
-        inp = ClickableLineEdit(); inp.setText(current_tags)
-        inp.setStyleSheet(f"background-color: {COLORS.get('bg_mid', '#333')}; border: 1px solid #444; padding: 6px; color: white;")
+        layout.setContentsMargins(20, 20, 20, 20)
+        info = QLabel("拖入该分类时自动绑定以下标签：\n(双击输入框选择历史标签)")
+        info.setStyleSheet("color: #888; font-size: 12px; margin-bottom: 5px;")
+        layout.addWidget(info)
+        
+        inp = ClickableLineEdit()
+        inp.setText(current_tags)
+        inp.setPlaceholderText("例如: 工作, 重要 (逗号分隔)")
+        inp.setStyleSheet(f"background-color: {COLORS.get('bg_mid', '#333')}; border: 1px solid #444; padding: 6px; border-radius: 4px; color: white;")
         layout.addWidget(inp)
         
         def open_tag_selector():
@@ -362,29 +377,39 @@ class Sidebar(QWidget):
             
         inp.doubleClicked.connect(open_tag_selector)
         
-        btn_ok = QPushButton("完成"); btn_ok.clicked.connect(dlg.accept); layout.addWidget(btn_ok)
+        btns = QHBoxLayout()
+        btns.addStretch()
+        btn_ok = QPushButton("完成")
+        btn_ok.setStyleSheet(f"background-color: {COLORS.get('primary', '#0078D4')}; border:none; padding: 5px 15px; border-radius: 4px; font-weight:bold; color: white;")
+        btn_ok.clicked.connect(dlg.accept)
+        btns.addWidget(btn_ok)
+        layout.addLayout(btns)
         
         if dlg.exec_() == QDialog.Accepted:
             new_tags = inp.text().strip()
             self.db.set_category_preset_tags(cat_id, new_tags)
+            tags_list = [t.strip() for t in new_tags.split(',') if t.strip()]
+            if tags_list:
+                self.db.apply_preset_tags_to_category_items(cat_id, tags_list)
             self.data_changed.emit()
 
     def _empty_trash(self):
-        if QMessageBox.Yes == QMessageBox.warning(self, '清空回收站', '确定清空?', QMessageBox.Yes | QMessageBox.No):
+        if QMessageBox.Yes == QMessageBox.warning(self, '清空回收站', '确定要清空回收站吗？\n此操作将永久删除所有内容，不可恢复！', QMessageBox.Yes | QMessageBox.No):
             self.db.empty_trash()
             self.data_changed.emit()
 
-    def get_current_selection_text(self):
-        current_sys = self.system_tree.currentItem()
-        current_user = self.partition_tree.currentItem()
-        if current_sys: return current_sys.text(0).split(' (')[0]
-        if current_user: return current_user.text(0).split(' (')[0]
-        return "全部数据"
-
+    # [关键修复] 补全缺失的辅助方法
     def get_current_selection_color(self):
-        current_user = self.partition_tree.currentItem()
-        if current_user:
-            data = current_user.data(0, Qt.UserRole)
+        item = self.partition_tree.currentItem()
+        if item:
+            data = item.data(0, Qt.UserRole)
             if data and data.get('type') == 'partition':
                 return data.get('color')
         return None
+
+    def get_current_selection_text(self):
+        sys_item = self.system_tree.currentItem()
+        part_item = self.partition_tree.currentItem()
+        if sys_item: return sys_item.text(0).split(' (')[0]
+        if part_item: return part_item.text(0).split(' (')[0]
+        return "全部数据"
