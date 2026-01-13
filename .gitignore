@@ -17,5 +17,5 @@
 
 # 你想禁止的文件（例如 JSON）
 *.json
-*.db
 *.txt
+*.BridgeLabelsAndRatings
