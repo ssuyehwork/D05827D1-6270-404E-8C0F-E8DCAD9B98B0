@@ -244,7 +244,7 @@ class QuickWindow(QWidget):
         self._update_partition_status_display()
 
     def _get_resize_area(self, pos):
-        check_widgets = [self.list_widget, self.sidebar, self.search_box, self.toolbar]
+        check_widgets = [self.splitter, self.search_box, self.toolbar]
         
         for widget in check_widgets:
             if widget and widget.isVisible():
@@ -647,15 +647,18 @@ class QuickWindow(QWidget):
             status = self.db.get_lock_status([idea_id])
             if status.get(idea_id, 0): return
         
-        if cat_id == -20: self.db.set_favorite(idea_id, True)
-        elif cat_id == -30: self.db.set_deleted(idea_id, True)
-        elif cat_id == -15: self.db.move_category(idea_id, None)
+        if cat_id == -20: self.db.set_favorite(idea_id, True, emit_signal=False)
+        elif cat_id == -30: self.db.set_deleted(idea_id, True, emit_signal=False)
+        elif cat_id == -15: self.db.move_category(idea_id, None, emit_signal=False)
         else: 
-            self.db.move_category(idea_id, cat_id)
+            self.db.move_category(idea_id, cat_id, emit_signal=False)
             if cat_id is not None:
                 recent_cats = load_setting('recent_categories', []); 
                 if cat_id in recent_cats: recent_cats.remove(cat_id)
                 recent_cats.insert(0, cat_id); save_setting('recent_categories', recent_cats)
+        
+        # 手动、仅刷新侧边栏
+        self.sidebar.refresh_ui()
 
     def _restore_window_state(self):
         geo_hex = load_setting("quick_window_geometry_hex")
