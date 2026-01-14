@@ -72,7 +72,7 @@ class Sidebar(QWidget):
         self.partition_tree.order_changed.connect(self._save_partition_order)
 
     def _on_system_selection_changed(self, current, previous):
-        if current:
+        if current and not self.system_tree._is_dragging_external:
             self.partition_tree.blockSignals(True)
             self.partition_tree.clearSelection()
             self.partition_tree.setCurrentItem(None)
@@ -88,7 +88,7 @@ class Sidebar(QWidget):
                     self.selection_changed.emit(p_type, None)
 
     def _on_partition_selection_changed(self, current, previous):
-        if current:
+        if current and not self.partition_tree._is_dragging_external:
             self.system_tree.blockSignals(True)
             self.system_tree.clearSelection()
             self.system_tree.setCurrentItem(None)
@@ -113,7 +113,6 @@ class Sidebar(QWidget):
         return QIcon(pixmap)
 
     def _update_partition_tree(self):
-        # [JULES_FIX] Save selection data, not the item, to prevent RuntimeError
         selected_data = None
         current_sys_item = self.system_tree.currentItem()
         current_user_item = self.partition_tree.currentItem()

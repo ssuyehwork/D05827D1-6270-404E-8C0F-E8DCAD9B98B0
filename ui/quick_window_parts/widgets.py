@@ -91,12 +91,16 @@ class DropTreeWidget(QTreeWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._is_dragging_external = False
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDropIndicatorShown(True)
 
     def dragEnterEvent(self, event):
+        if event.source() != self:
+            self._is_dragging_external = True
+
         if event.source() == self:
             super().dragEnterEvent(event)
             event.accept()
@@ -107,6 +111,10 @@ class DropTreeWidget(QTreeWidget):
             event.accept()
         else:
             event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._is_dragging_external = False
+        super().dragLeaveEvent(event)
 
     def dragMoveEvent(self, event):
         if event.source() == self:
@@ -121,6 +129,7 @@ class DropTreeWidget(QTreeWidget):
                 data = item.data(0, Qt.UserRole)
                 if item.flags() & Qt.ItemIsDropEnabled:
                     if isinstance(data, dict) and data.get('type') in ['partition', 'bookmark', 'trash', 'uncategorized']:
+                        self.setCurrentItem(item)
                         event.accept()
                         return
             event.ignore()
@@ -128,6 +137,7 @@ class DropTreeWidget(QTreeWidget):
             event.ignore()
 
     def dropEvent(self, event):
+        self._is_dragging_external = False # Reset flag on drop
         # 1. 笔记归档 (支持多选)
         if event.mimeData().hasFormat('application/x-idea-ids'):
             try:

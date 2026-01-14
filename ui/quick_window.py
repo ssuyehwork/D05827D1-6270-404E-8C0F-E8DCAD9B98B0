@@ -244,7 +244,6 @@ class QuickWindow(QWidget):
         self._update_partition_status_display()
 
     def _get_resize_area(self, pos):
-        # [JULES_FIX] Add splitter to prevent resize cursor from sticking over content area
         check_widgets = [self.splitter, self.search_box, self.toolbar]
         
         for widget in check_widgets:
