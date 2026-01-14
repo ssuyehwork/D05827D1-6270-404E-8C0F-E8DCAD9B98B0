@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QL
                              QListWidgetItem, QMenu, QColorDialog, QInputDialog, 
                              QMessageBox, QFrame, QAbstractItemView)
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSettings, QUrl, QMimeData, pyqtSignal, QObject, QSize, QByteArray, QBuffer, QIODevice
-from PyQt5.QtGui import QImage, QColor, QCursor, QPixmap, QKeySequence, QIcon, QPainter
+from PyQt5.QtGui import QImage, QColor, QCursor, QPixmap, QKeySequence, QIcon, QPainter, QTransform
 
 from services.preview_service import PreviewService
 from ui.dialogs import EditDialog
@@ -730,21 +730,74 @@ class QuickWindow(QWidget):
         self.toolbar.update_pagination(self.current_page, self.total_pages)
         items = self.db.get_ideas(search=search_text, f_type=f_type, f_val=f_val, page=self.current_page, page_size=self.page_size)
         self.list_widget.clear()
+        
         for item_tuple in items:
             list_item = QListWidgetItem()
             list_item.setData(Qt.UserRole, item_tuple)
             text_part = self._get_content_display(item_tuple)
             list_item.setText(text_part)
-            item_type = item_tuple['item_type'] or 'text'; icon = QIcon()
-            if item_type == 'image' and item_tuple['data_blob']:
-                pixmap = QPixmap(); pixmap.loadFromData(item_tuple['data_blob'])
-                if not pixmap.isNull(): icon = QIcon(pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            else:
-                icon_name = 'folder.svg' if item_type == 'folder' else 'all_data.svg'
-                icon = create_svg_icon(icon_name, "#888")
+            
+            # --- 智能图标逻辑 (Flexible Logic) ---
+            item_type = item_tuple['item_type'] or 'text'
+            content = item_tuple['content'] or ""
+            
+            # 默认
+            icon_name = 'text.svg'
+            icon_color = "#95a5a6" # 默认浅灰色 (纯文本)
+
+            if item_type == 'image':
+                # 如果是图片且有数据，尝试显示缩略图
+                if item_tuple['data_blob']:
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(item_tuple['data_blob'])
+                    if not pixmap.isNull():
+                        icon = QIcon(pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                        list_item.setIcon(icon)
+                        self._update_list_item_tooltip(list_item, item_tuple)
+                        self.list_widget.addItem(list_item)
+                        continue
+                icon_name = 'image_icon.svg'
+                icon_color = "#9b59b6" 
+            elif item_type == 'file' or item_type == 'files':
+                icon_name = 'file.svg'
+                icon_color = "#f1c40f"
+            elif item_type == 'folder':
+                icon_name = 'folder.svg'
+                icon_color = "#e67e22"
+            elif item_type == 'text':
+                # 【核心修复】智能检测文本内容，忽略引号
+                stripped = content.strip()
+                # 预处理：去掉两端的引号（解决Windows复制路径带引号问题）
+                clean_path = stripped.strip('"\'')
+                
+                # 1. 检测链接
+                if stripped.startswith(('http://', 'https://', 'www.')):
+                    icon_name = 'link.svg'
+                    icon_color = "#3498db"
+                # 2. 检测代码片段
+                elif stripped.startswith(('#', 'import ', 'class ', 'def ', '<', '{', 'function', 'var ', 'const ')):
+                    icon_name = 'code.svg'
+                    icon_color = "#2ecc71"
+                # 3. 【新】灵活检测文件路径
+                elif len(clean_path) < 260 and (
+                    (len(clean_path) > 2 and clean_path[1] == ':') or 
+                    clean_path.startswith(('\\\\', '/', './', '../'))
+                ):
+                    # 只有在看起来像路径时才调用系统IO检测
+                    if os.path.exists(clean_path):
+                        if os.path.isdir(clean_path):
+                            icon_name = 'folder.svg'
+                            icon_color = "#e67e22"
+                        else:
+                            icon_name = 'file.svg' # 这次会正确显示文档图标
+                            icon_color = "#f1c40f"
+            
+            icon = create_svg_icon(icon_name, icon_color)
             list_item.setIcon(icon)
+            
             self._update_list_item_tooltip(list_item, item_tuple)
             self.list_widget.addItem(list_item)
+            
         if self.list_widget.count() > 0: self.list_widget.setCurrentRow(0)
 
     def _on_sidebar_selection_changed(self, f_type, f_val):

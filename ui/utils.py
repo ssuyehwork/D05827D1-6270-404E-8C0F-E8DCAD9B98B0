@@ -11,21 +11,29 @@ from PyQt5.QtWidgets import QApplication
 # 🎨 专业配色方案 (用于 Icon 智能着色)
 # ==========================================
 _icon_theme_colors = {
-    'all_data.svg':      '#3498db',
-    'today.svg':         '#2ecc71',
-    'uncategorized.svg': '#e67e22',
-    'untagged.svg':      '#95a5a6',
-    'bookmark.svg':      '#ff6b81',
-    'trash.svg':         '#e74c3c',
-    'select.svg':        '#1abc9c',
+    # 系统与状态
+    'all_data.svg':      '#3498db', # 蓝
+    'today.svg':         '#2ecc71', # 绿
+    'uncategorized.svg': '#e67e22', # 橙
+    'untagged.svg':      '#95a5a6', # 灰
+    'bookmark.svg':      '#ff6b81', # 红粉
+    'trash.svg':         '#e74c3c', # 红
+    'select.svg':        '#1abc9c', # 青
     'lock.svg':          '#e74c3c', 
     'star_filled.svg':   '#f39c12',
-    'action_fav_filled.svg': '#ff6b81', 
-    'pencil.svg':        '#aaaaaa',
-    'clock.svg':         '#aaaaaa',
+    
+    # 列表内容类型
+    'text.svg':          '#95a5a6', # 灰色 (纯文本使用更中性的颜色)
+    'code.svg':          '#2ecc71', # 绿色 (代码)
+    'link.svg':          '#3498db', # 蓝色 (链接)
+    'file.svg':          '#f1c40f', # 黄色 (文件)
+    'image_icon.svg':    '#9b59b6', # 紫色 (图片)
+    'folder.svg':        '#e67e22', # 橙色 (文件夹)
+
+    # 界面元素
     'branch.svg':        '#9b59b6', 
     'category.svg':      '#8e44ad',
-    'pin_tilted.svg':    '#3498db', 
+    'pin_tilted.svg':    '#aaaaaa', 
     'pin_vertical.svg':  '#e74c3c',  
     'display.svg':       '#81D4FA', 
     'coffee.svg':        '#BCAAA4',   
@@ -42,14 +50,51 @@ _icon_theme_colors = {
     'rename.svg':        '#5DADE2',
     'refresh.svg':       '#48C9B0',
     'inspiration.svg':   '#F4D03F',
-    'brush.svg':         '#E67E22'
+    'brush.svg':         '#E67E22',
+    
+    # 通用按钮
+    'action_fav_filled.svg': '#ff6b81', 
+    'pencil.svg':        '#aaaaaa',
+    'clock.svg':         '#aaaaaa',
 }
 
 # ==========================================
 # 💎 内置 SVG 图标数据
 # ==========================================
 _system_icons = {
-    # [核心] 分支图标 (替代文件夹): 体现节点结构
+    # --- [修正] 纯文本图标 (图1)：只有线条，代表纯内容 ---
+    'text.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="18" x2="15" y2="18"></line>
+    </svg>""",
+    
+    # --- [修正] 文件/文档图标 (图2)：折角纸张，代表文件 ---
+    'file.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+        <line x1="10" y1="9" x2="8" y2="9"></line>
+    </svg>""",
+
+    'code.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+    </svg>""",
+    
+    'link.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+    </svg>""",
+    
+    'image_icon.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+        <polyline points="21 15 16 10 5 21"></polyline>
+    </svg>""",
+
+    # --- 现有图标 ---
     'branch.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="5" r="3"></circle>
         <path d="M12 8v5"></path>
@@ -59,134 +104,95 @@ _system_icons = {
         <circle cx="17" cy="19" r="3"></circle>
     </svg>""",
 
-    # [新增] 分类图标: 展示分类系统的层次结构
     'category.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <!-- 顶层分类 -->
         <rect x="8" y="2" width="8" height="6" rx="1"></rect>
-        <!-- 中层连接线 -->
         <path d="M12 8 v3"></path>
         <path d="M12 11 h-6"></path>
         <path d="M12 11 h6"></path>
-        <!-- 左侧子分类 -->
         <rect x="2" y="13" width="8" height="5" rx="1"></rect>
-        <!-- 右侧子分类 -->
         <rect x="14" y="13" width="8" height="5" rx="1"></rect>
-        <!-- 装饰点 -->
         <circle cx="12" cy="5" r="1" fill="currentColor"></circle>
         <circle cx="6" cy="15.5" r="1" fill="currentColor"></circle>
         <circle cx="18" cy="15.5" r="1" fill="currentColor"></circle>
     </svg>""",
 
-    # [修改] 未分类: 根据您的要求，改为"问号+分支"结构
     'uncategorized.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <!-- 左侧：问号 -->
         <path d="M5 8 C5 4 10 4 10 8 C10 11 7 12 7 14" />
         <circle cx="7" cy="19" r="1" fill="currentColor" stroke="none"/>
-        
-        <!-- 右侧：分支结构 (E型) -->
-        <path d="M14 5 v14" /> <!-- 竖线 -->
-        
-        <!-- 上分支 -->
+        <path d="M14 5 v14" />
         <path d="M14 6 h3" /> <circle cx="20" cy="6" r="2" />
-        <!-- 中分支 -->
         <path d="M14 12 h3" /> <circle cx="20" cy="12" r="2" />
-        <!-- 下分支 -->
         <path d="M14 18 h3" /> <circle cx="20" cy="18" r="2" />
     </svg>""",
 
-    # [兼容] 如果有代码还在调用 folder.svg，强制指向分支样式，彻底消灭文件夹图标
     'folder.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="5" r="3"></circle>
-        <path d="M12 8v5"></path>
-        <path d="M12 13l-5 4"></path>
-        <path d="M12 13l5 4"></path>
-        <circle cx="7" cy="19" r="3"></circle>
-        <circle cx="17" cy="19" r="3"></circle>
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
     </svg>""",
 
-    # [优化] 改进的倾斜图钉 - 加长主体，保持原有设计风格
     'pin_tilted.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="rotate(45 12 12)">
-        <!-- 图钉主体结构 -->
         <path d="M16 12V6H8v6l-2 2v2h5v8l1 1 1-1v-8h5v-2l-2-2z"></path>
     </svg>""",
 
-    # [新增] 随机颜色图标: 调色板与骰子的创意结合
     'random_color.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <!-- 调色板轮廓 -->
         <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
-        <!-- 彩色色块 - 用圆圈表示 -->
         <circle cx="7" cy="8" r="1.5" fill="#FF6B6B" stroke="none"/>
         <circle cx="11" cy="6" r="1.5" fill="#4ECDC4" stroke="none"/>
         <circle cx="16" cy="8" r="1.5" fill="#FFE66D" stroke="none"/>
         <circle cx="6" cy="13" r="1.5" fill="#95E1D3" stroke="none"/>
-        <!-- 骰子点 (表示随机性) -->
         <circle cx="15" cy="14" r="0.8" fill="currentColor"/>
         <circle cx="17" cy="16" r="0.8" fill="currentColor"/>
         <circle cx="13" cy="16" r="0.8" fill="currentColor"/>
     </svg>""",
 
-    # [新增] 重命名图标: 铅笔与文字的结合
     'rename.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <!-- 文字标签框 -->
         <rect x="3" y="11" width="13" height="8" rx="1" stroke-dasharray="2,2"></rect>
-        <!-- 文字线条 (代表文本) -->
         <line x1="5" y1="14" x2="10" y2="14" stroke-width="1.5"></line>
         <line x1="5" y1="17" x2="13" y2="17" stroke-width="1.5"></line>
-        <!-- 编辑铅笔 -->
         <path d="M15 4l4 4"></path>
         <path d="M19 8L10 17H6v-4l9-9z"></path>
-        <!-- 铅笔高光 -->
         <path d="M16 5l2 2" stroke-width="1" opacity="0.5"></path>
     </svg>""",
 
-    # [新增] 刷新图标: 循环箭头，带动感
     'refresh.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <!-- 主循环箭头 -->
         <path d="M21.5 2v6h-6"></path>
         <path d="M2.5 22v-6h6"></path>
-        <!-- 圆弧路径 -->
         <path d="M21.5 8A10 10 0 0 0 6 3.5l-3.5 4"></path>
         <path d="M2.5 16A10 10 0 0 0 18 20.5l3.5-4"></path>
-        <!-- 装饰性小点 (表示运动) -->
         <circle cx="12" cy="12" r="1.5" fill="currentColor" opacity="0.3"></circle>
     </svg>""",
 
-    # [新增] 灵感图标: 灯泡与星星的创意组合
     'inspiration.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <!-- 灯泡主体 -->
         <path d="M9 18h6"></path>
         <path d="M10 22h4"></path>
         <path d="M15 8a5 5 0 1 0-6 4.9V14h6v-1.1A5 5 0 0 0 15 8z"></path>
-        <!-- 灯泡内的灯丝 -->
         <path d="M12 3v1" stroke-width="1.5"></path>
-        <!-- 创意火花 (周围的星星) -->
         <path d="M6 8l-1.5-1.5"></path>
         <path d="M18 8l1.5-1.5"></path>
         <path d="M4 13H2"></path>
         <path d="M22 13h-2"></path>
-        <!-- 顶部闪烁星星 -->
         <circle cx="12" cy="2" r="0.5" fill="currentColor"></circle>
         <path d="M12 1v2" stroke-width="1"></path>
         <path d="M11 2h2" stroke-width="1"></path>
     </svg>""",
 
-    # [新增] 刷子图标: 清除/移除专用
     'brush.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <!-- 刷子手柄 -->
         <path d="M3 12 l6-6"></path>
-        <!-- 刷毛束 (主体) -->
         <path d="M9 6 l9-3 l3 3 l-3 9 l-6-6z"></path>
-        <!-- 刷毛细节线条 (增加质感) -->
         <path d="M14 8 l2 2" stroke-width="1.5" opacity="0.6"></path>
         <path d="M12 10 l2 2" stroke-width="1.5" opacity="0.6"></path>
         <path d="M16 6 l2 2" stroke-width="1.5" opacity="0.6"></path>
-        <!-- 清洁效果 (擦除痕迹) -->
         <path d="M2 22 l4-4" stroke-width="2.5" stroke-linecap="round" opacity="0.3"></path>
         <path d="M4 22 l4-4" stroke-width="2" stroke-linecap="round" opacity="0.4"></path>
     </svg>""",
 
     'select.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>""",
-    'all_data.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>""",
+    
+    'all_data.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+    </svg>""",
+    
     'today.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>""",
     
     'untagged.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>""",

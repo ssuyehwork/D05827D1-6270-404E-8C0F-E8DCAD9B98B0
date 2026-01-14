@@ -103,6 +103,7 @@ class MainWindow(QWidget):
         self.header.toggle_filter.connect(self._toggle_filter_panel)
         self.header.toggle_metadata.connect(self._toggle_metadata_panel_state)
         self.header.new_idea_requested.connect(self.new_idea)
+        self.header.refresh_requested.connect(self._refresh_all)
         
         outer_layout.addWidget(self.header)
         
@@ -118,7 +119,6 @@ class MainWindow(QWidget):
         self.sidebar.data_changed.connect(self._load_data)
         self.sidebar.new_data_requested.connect(self._on_new_data_in_category_requested)
         self.sidebar.items_moved.connect(self._handle_items_moved)
-        self.header.refresh_requested.connect(self.sidebar.refresh)
         self.sidebar.setMinimumWidth(200)
         
         # 中间卡片区 (包含操作栏)
@@ -317,9 +317,9 @@ class MainWindow(QWidget):
                 self.cached_metadata.extend(sub_data)
         
         # 2. 获取子文件夹
+        self.current_sub_folders = []
         # [关键修复] 只有在浏览“具体分类”时才显示子文件夹。
         # 如果是“未分类”（ID为None），坚决不加载顶级文件夹。
-        self.current_sub_folders = []
         if self.curr_filter[0] == 'category' and self.curr_filter[1] is not None:
             current_cat_id = self.curr_filter[1]
             all_categories = self.service.get_categories() 
@@ -478,6 +478,8 @@ class MainWindow(QWidget):
     def _do_edit(self):
         if len(self.selected_ids) == 1:
             idea_id = list(self.selected_ids)[0]
+            status = self.service.get_lock_status([idea_id])
+            if status.get(idea_id, 0): return
             self._open_edit_dialog(idea_id=idea_id)
             
     def _open_edit_dialog(self, idea_id=None, category_id_for_new=None):
@@ -541,6 +543,14 @@ class MainWindow(QWidget):
         
         self.is_recursive_mode = False
         self.card_list_view.set_recursive_mode(False) 
+
+        # ==========================================
+        # 【修复】切换分类时，强制重置高级筛选器
+        # ==========================================
+        if hasattr(self, 'filter_panel'):
+            self.filter_panel.blockSignals(True) # 暂时屏蔽信号，避免触发多余的刷新
+            self.filter_panel.reset_filters()
+            self.filter_panel.blockSignals(False)
         
         titles = {'all':'全部数据','today':'今日数据','trash':'回收站','favorite':'我的收藏'}
         cat_name = '文件夹'
@@ -550,6 +560,7 @@ class MainWindow(QWidget):
         self.header_label.setText(f"{cat_name}" if f_type=='category' else titles.get(f_type, '灵感列表'))
         icon_map = {'all': 'all_data.svg', 'today': 'today.svg', 'uncategorized': 'uncategorized.svg', 'untagged': 'untagged.svg', 'bookmark': 'bookmark.svg', 'trash': 'trash.svg', 'category': 'folder.svg'}
         self.header_icon.setPixmap(create_svg_icon(icon_map.get(f_type, 'all_data.svg'), COLORS['primary']).pixmap(20, 20))
+        
         self._refresh_all()
         QTimer.singleShot(10, self._rebuild_filter_panel)
     
@@ -639,6 +650,7 @@ class MainWindow(QWidget):
 
     def _move_to_category(self, cat_id):
         if not self.selected_ids: return
+        
         if cat_id is not None:
             recent_cats = load_setting('recent_categories', [])
             if cat_id in recent_cats: recent_cats.remove(cat_id)
@@ -736,11 +748,15 @@ class MainWindow(QWidget):
             menu.addSeparator()
             cat_menu = menu.addMenu(create_svg_icon('folder.svg', '#cccccc'), '移动到分类')
             
+            # [优化] 仅显示最近使用的 15 个分类
             recent_cats = load_setting('recent_categories', [])
             all_cats = {c['id']: c for c in self.service.get_categories()}
+            
+            # 添加固定的“未分类”选项
             action_uncategorized = cat_menu.addAction('⚠️ 未分类')
             action_uncategorized.triggered.connect(lambda: self._move_to_category(None))
 
+            # 添加最近使用且仍然存在的分类
             count = 0
             for cat_id in recent_cats:
                 if count >= 15: break
@@ -759,6 +775,7 @@ class MainWindow(QWidget):
         card = self.card_list_view.get_card(idea_id)
         if card: menu.exec_(card.mapToGlobal(pos))
 
+    # --- 窗口拖拽与调整大小逻辑 ---
     def _get_resize_area(self, pos):
         x, y = pos.x(), pos.y(); w, h = self.width(), self.height(); m = self.RESIZE_MARGIN
         areas = []
@@ -832,6 +849,7 @@ class MainWindow(QWidget):
         if hasattr(self, "sidebar"): save_setting("sidebar_width", self.sidebar.width())
 
     def refresh_logo(self):
+        """刷新标题栏 Logo"""
         self.header.refresh_logo()
 
     def save_state(self):
@@ -853,6 +871,7 @@ class MainWindow(QWidget):
         sw = load_setting("sidebar_width")
         if sw and hasattr(self, "main_splitter"): QTimer.singleShot(0, lambda: self.main_splitter.setSizes([int(sw), self.width()-int(sw)]))
 
+        # Restore metadata panel visibility
         if load_setting("metadata_panel_visible", False):
             self._show_metadata_panel()
 
