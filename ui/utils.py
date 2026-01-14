@@ -13,10 +13,10 @@ from PyQt5.QtWidgets import QApplication
 _icon_theme_colors = {
     'all_data.svg':      '#3498db',
     'today.svg':         '#2ecc71',
-    'uncategorized.svg': '#e67e22', # 保持原有的橙色，或者如果您喜欢图2的黄色，可以改为 '#FFC107'
+    'uncategorized.svg': '#e67e22',
     'untagged.svg':      '#95a5a6',
     'bookmark.svg':      '#ff6b81',
-    'trash.svg':         '#e74c3c',
+    'trash.svg':         '#e74c3c',  # 确保回收站图标也是彩色的
     'select.svg':        '#1abc9c',
     'lock.svg':          '#e74c3c', 
     'star_filled.svg':   '#f39c12',
@@ -36,11 +36,17 @@ _icon_theme_colors = {
     'book.svg': '#9FA8DA',     
     'leaf.svg': '#A5D6A7',     
     'book-open.svg': '#FFCC80',
-    'zap.svg': '#FFEB3B',      
-    'monitor.svg': '#B0BEC5',  
+    'zap.svg': '#FFEB3B',
+    'monitor.svg': '#B0BEC5',
     'action_add.svg': '#C5E1A5',
-    'tag.svg': '#FFAB91',      
-    'power.svg': '#EF9A9A'     
+    'tag.svg': '#FFAB91',
+    'power.svg': '#EF9A9A',
+
+    # --- 右键菜单新增配色 ---
+    'action_restore.svg': '#3498db', # 刷新
+    'palette.svg':        '#9b59b6', # 设置颜色
+    'action_edit.svg':    '#2ecc71', # 重命名
+    'win_close.svg':      '#e74c3c'  # 删除
 }
 
 # ==========================================

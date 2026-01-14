@@ -364,17 +364,17 @@ class Sidebar(QWidget):
         elif dtype == 'category':
             cat_id = data.get('id')
             current_name = item.text(0).split(' (')[0]
-            menu.addAction(create_svg_icon('action_add.svg'), '新建灵感', lambda: self.new_data_requested.emit(cat_id))
+            menu.addAction(create_svg_icon('zap.svg'), '新建灵感', lambda: self.new_data_requested.emit(cat_id))
             menu.addSeparator()
             menu.addAction(create_svg_icon('palette.svg'), '设置颜色', lambda: self._change_color(cat_id))
             # [功能] 随机颜色
-            menu.addAction(create_svg_icon('zap.svg'), '随机颜色', lambda: self._set_random_color(cat_id))
+            menu.addAction(create_svg_icon('power.svg'), '随机颜色', lambda: self._set_random_color(cat_id))
             menu.addAction(create_svg_icon('tag.svg'), '设置预设标签', lambda: self._set_preset_tags(cat_id))
             menu.addSeparator()
             menu.addAction(create_svg_icon('action_add.svg'), '新建分组', self._new_group)
             menu.addAction(create_svg_icon('action_add.svg'), '新建分区', lambda: self._new_zone(cat_id))
             menu.addAction(create_svg_icon('action_edit.svg'), '重命名', lambda: self._rename_category(cat_id, current_name))
-            menu.addAction(create_svg_icon('action_delete.svg'), '删除', lambda: self._del_category(cat_id))
+            menu.addAction(create_svg_icon('win_close.svg'), '删除', lambda: self._del_category(cat_id))
         menu.exec_(sender_tree.mapToGlobal(pos))
 
     def _empty_trash(self):
