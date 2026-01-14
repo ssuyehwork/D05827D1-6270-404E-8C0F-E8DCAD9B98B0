@@ -50,10 +50,9 @@ class IdeaService:
         self.idea_repo.toggle_field(iid, field)
         app_signals.data_changed.emit()
 
-    def set_favorite(self, iid, state, emit_signal=True):
+    def set_favorite(self, iid, state):
         self.idea_repo.update_field(iid, 'is_favorite', 1 if state else 0)
-        if emit_signal:
-            app_signals.data_changed.emit()
+        app_signals.data_changed.emit()
 
     def set_deleted(self, iid, state, emit_signal=True):
         val = 1 if state else 0
