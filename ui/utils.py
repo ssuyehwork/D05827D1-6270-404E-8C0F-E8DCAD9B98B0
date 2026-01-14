@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import QApplication
 _icon_theme_colors = {
     'all_data.svg':      '#3498db',
     'today.svg':         '#2ecc71',
-    'uncategorized.svg': '#e67e22', # 保持原有的橙色，或者如果您喜欢图2的黄色，可以改为 '#FFC107'
+    'uncategorized.svg': '#e67e22',
     'untagged.svg':      '#95a5a6',
     'bookmark.svg':      '#ff6b81',
     'trash.svg':         '#e74c3c',
@@ -23,24 +23,26 @@ _icon_theme_colors = {
     'action_fav_filled.svg': '#ff6b81', 
     'pencil.svg':        '#aaaaaa',
     'clock.svg':         '#aaaaaa',
-    
-    # 分支/分组图标配色
     'branch.svg':        '#9b59b6', 
-    
-    'pin_tilted.svg':    '#aaaaaa', 
+    'category.svg':      '#8e44ad',
+    'pin_tilted.svg':    '#3498db', 
     'pin_vertical.svg':  '#e74c3c',  
-    
-    'display.svg': '#81D4FA', 
-    'coffee.svg': '#BCAAA4',   
-    'grid.svg': '#90A4AE',     
-    'book.svg': '#9FA8DA',     
-    'leaf.svg': '#A5D6A7',     
-    'book-open.svg': '#FFCC80',
-    'zap.svg': '#FFEB3B',      
-    'monitor.svg': '#B0BEC5',  
-    'action_add.svg': '#C5E1A5',
-    'tag.svg': '#FFAB91',      
-    'power.svg': '#EF9A9A'     
+    'display.svg':       '#81D4FA', 
+    'coffee.svg':        '#BCAAA4',   
+    'grid.svg':          '#90A4AE',     
+    'book.svg':          '#9FA8DA',     
+    'leaf.svg':          '#A5D6A7',     
+    'book-open.svg':     '#FFCC80',
+    'zap.svg':           '#FFEB3B',      
+    'monitor.svg':       '#B0BEC5',  
+    'action_add.svg':    '#C5E1A5',
+    'tag.svg':           '#FFAB91',      
+    'power.svg':         '#EF9A9A',
+    'random_color.svg':  '#FF6B9D',
+    'rename.svg':        '#5DADE2',
+    'refresh.svg':       '#48C9B0',
+    'inspiration.svg':   '#F4D03F',
+    'brush.svg':         '#E67E22'
 }
 
 # ==========================================
@@ -55,6 +57,24 @@ _system_icons = {
         <path d="M12 13l5 4"></path>
         <circle cx="7" cy="19" r="3"></circle>
         <circle cx="17" cy="19" r="3"></circle>
+    </svg>""",
+
+    # [新增] 分类图标: 展示分类系统的层次结构
+    'category.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- 顶层分类 -->
+        <rect x="8" y="2" width="8" height="6" rx="1"></rect>
+        <!-- 中层连接线 -->
+        <path d="M12 8 v3"></path>
+        <path d="M12 11 h-6"></path>
+        <path d="M12 11 h6"></path>
+        <!-- 左侧子分类 -->
+        <rect x="2" y="13" width="8" height="5" rx="1"></rect>
+        <!-- 右侧子分类 -->
+        <rect x="14" y="13" width="8" height="5" rx="1"></rect>
+        <!-- 装饰点 -->
+        <circle cx="12" cy="5" r="1" fill="currentColor"></circle>
+        <circle cx="6" cy="15.5" r="1" fill="currentColor"></circle>
+        <circle cx="18" cy="15.5" r="1" fill="currentColor"></circle>
     </svg>""",
 
     # [修改] 未分类: 根据您的要求，改为"问号+分支"结构
@@ -84,6 +104,87 @@ _system_icons = {
         <circle cx="17" cy="19" r="3"></circle>
     </svg>""",
 
+    # [优化] 改进的倾斜图钉 - 加长主体，保持原有设计风格
+    'pin_tilted.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="rotate(45 12 12)">
+        <!-- 图钉主体结构 -->
+        <path d="M16 12V6H8v6l-2 2v2h5v8l1 1 1-1v-8h5v-2l-2-2z"></path>
+    </svg>""",
+
+    # [新增] 随机颜色图标: 调色板与骰子的创意结合
+    'random_color.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- 调色板轮廓 -->
+        <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+        <!-- 彩色色块 - 用圆圈表示 -->
+        <circle cx="7" cy="8" r="1.5" fill="#FF6B6B" stroke="none"/>
+        <circle cx="11" cy="6" r="1.5" fill="#4ECDC4" stroke="none"/>
+        <circle cx="16" cy="8" r="1.5" fill="#FFE66D" stroke="none"/>
+        <circle cx="6" cy="13" r="1.5" fill="#95E1D3" stroke="none"/>
+        <!-- 骰子点 (表示随机性) -->
+        <circle cx="15" cy="14" r="0.8" fill="currentColor"/>
+        <circle cx="17" cy="16" r="0.8" fill="currentColor"/>
+        <circle cx="13" cy="16" r="0.8" fill="currentColor"/>
+    </svg>""",
+
+    # [新增] 重命名图标: 铅笔与文字的结合
+    'rename.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- 文字标签框 -->
+        <rect x="3" y="11" width="13" height="8" rx="1" stroke-dasharray="2,2"></rect>
+        <!-- 文字线条 (代表文本) -->
+        <line x1="5" y1="14" x2="10" y2="14" stroke-width="1.5"></line>
+        <line x1="5" y1="17" x2="13" y2="17" stroke-width="1.5"></line>
+        <!-- 编辑铅笔 -->
+        <path d="M15 4l4 4"></path>
+        <path d="M19 8L10 17H6v-4l9-9z"></path>
+        <!-- 铅笔高光 -->
+        <path d="M16 5l2 2" stroke-width="1" opacity="0.5"></path>
+    </svg>""",
+
+    # [新增] 刷新图标: 循环箭头，带动感
+    'refresh.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- 主循环箭头 -->
+        <path d="M21.5 2v6h-6"></path>
+        <path d="M2.5 22v-6h6"></path>
+        <!-- 圆弧路径 -->
+        <path d="M21.5 8A10 10 0 0 0 6 3.5l-3.5 4"></path>
+        <path d="M2.5 16A10 10 0 0 0 18 20.5l3.5-4"></path>
+        <!-- 装饰性小点 (表示运动) -->
+        <circle cx="12" cy="12" r="1.5" fill="currentColor" opacity="0.3"></circle>
+    </svg>""",
+
+    # [新增] 灵感图标: 灯泡与星星的创意组合
+    'inspiration.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- 灯泡主体 -->
+        <path d="M9 18h6"></path>
+        <path d="M10 22h4"></path>
+        <path d="M15 8a5 5 0 1 0-6 4.9V14h6v-1.1A5 5 0 0 0 15 8z"></path>
+        <!-- 灯泡内的灯丝 -->
+        <path d="M12 3v1" stroke-width="1.5"></path>
+        <!-- 创意火花 (周围的星星) -->
+        <path d="M6 8l-1.5-1.5"></path>
+        <path d="M18 8l1.5-1.5"></path>
+        <path d="M4 13H2"></path>
+        <path d="M22 13h-2"></path>
+        <!-- 顶部闪烁星星 -->
+        <circle cx="12" cy="2" r="0.5" fill="currentColor"></circle>
+        <path d="M12 1v2" stroke-width="1"></path>
+        <path d="M11 2h2" stroke-width="1"></path>
+    </svg>""",
+
+    # [新增] 刷子图标: 清除/移除专用
+    'brush.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- 刷子手柄 -->
+        <path d="M3 12 l6-6"></path>
+        <!-- 刷毛束 (主体) -->
+        <path d="M9 6 l9-3 l3 3 l-3 9 l-6-6z"></path>
+        <!-- 刷毛细节线条 (增加质感) -->
+        <path d="M14 8 l2 2" stroke-width="1.5" opacity="0.6"></path>
+        <path d="M12 10 l2 2" stroke-width="1.5" opacity="0.6"></path>
+        <path d="M16 6 l2 2" stroke-width="1.5" opacity="0.6"></path>
+        <!-- 清洁效果 (擦除痕迹) -->
+        <path d="M2 22 l4-4" stroke-width="2.5" stroke-linecap="round" opacity="0.3"></path>
+        <path d="M4 22 l4-4" stroke-width="2" stroke-linecap="round" opacity="0.4"></path>
+    </svg>""",
+
     'select.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>""",
     'all_data.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>""",
     'today.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>""",
@@ -99,7 +200,6 @@ _system_icons = {
     'sidebar_right.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>""",
     'action_add.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>""",
     'action_edit.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>""",
-    'pin_tilted.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="rotate(45 12 12)"><path d="M16 12V8H8v4l-2 2v2h5v6l1 1 1-1v-6h5v-2l-2-2z"></path></svg>""",
     'pin_vertical.svg': """<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1.03 1 1.03-1v-7H19v-2c-1.66 0-3-1.34-3-3z"></path></svg>""",
     'action_fav.svg': """<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>""",
     'action_fav_filled.svg': """<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>""",
