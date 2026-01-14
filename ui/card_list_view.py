@@ -60,7 +60,7 @@ class CardListView(QScrollArea):
         
         self.layout = QVBoxLayout(self.container)
         self.layout.setContentsMargins(20, 20, 20, 20) 
-        self.layout.setSpacing(20) 
+        self.layout.setSpacing(10) 
         
         self.setWidget(self.container)
 
