@@ -26,12 +26,14 @@ class DropTreeWidget(QTreeWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._is_dragging_over = False
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDropIndicatorShown(True)
 
     def dragEnterEvent(self, event):
+        self._is_dragging_over = True
         if event.source() == self:
             super().dragEnterEvent(event)
             event.accept()
@@ -39,6 +41,10 @@ class DropTreeWidget(QTreeWidget):
             event.accept()
         else:
             event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._is_dragging_over = False
+        super().dragLeaveEvent(event)
 
     def dragMoveEvent(self, event):
         if event.source() == self:
@@ -59,6 +65,7 @@ class DropTreeWidget(QTreeWidget):
             event.ignore()
 
     def dropEvent(self, event):
+        self._is_dragging_over = False # 拖拽结束，重置标记
         if event.mimeData().hasFormat('application/x-idea-ids'):
             try:
                 raw_data = event.mimeData().data('application/x-idea-ids').data().decode('utf-8')
@@ -219,7 +226,7 @@ class Sidebar(QWidget):
                 self._add_partition_recursive(partition.children, item, partition_counts)
 
     def _on_system_selection_changed(self, current, previous):
-        if current:
+        if current and not self.system_tree._is_dragging_over:
             self.partition_tree.blockSignals(True)
             self.partition_tree.clearSelection()
             self.partition_tree.setCurrentItem(None)
@@ -234,7 +241,7 @@ class Sidebar(QWidget):
                     self.selection_changed.emit('category', None)
 
     def _on_partition_selection_changed(self, current, previous):
-        if current:
+        if current and not self.partition_tree._is_dragging_over:
             self.system_tree.blockSignals(True)
             self.system_tree.clearSelection()
             self.system_tree.setCurrentItem(None)
