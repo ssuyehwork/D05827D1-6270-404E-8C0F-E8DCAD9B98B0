@@ -347,11 +347,11 @@ class Sidebar(QWidget):
         menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_dark']}; color: white; border: 1px solid #444; }} QMenu::item {{ padding: 6px 20px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }}")
 
         # [功能] 刷新
-        menu.addAction('刷新', self.refresh)
+        menu.addAction(create_svg_icon('action_restore.svg'), '刷新', self.refresh)
         menu.addSeparator()
 
         if not item or item.text(0) == "我的分区":
-            menu.addAction('➕ 新建分组', self._new_group)
+            menu.addAction(create_svg_icon('action_add.svg'), '新建分组', self._new_group)
             menu.exec_(sender_tree.mapToGlobal(pos))
             return
 
@@ -360,21 +360,21 @@ class Sidebar(QWidget):
         dtype = data.get('type')
         
         if dtype == 'trash':
-            menu.addAction('清空回收站', self._empty_trash)
+            menu.addAction(create_svg_icon('trash.svg'), '清空回收站', self._empty_trash)
         elif dtype == 'category':
             cat_id = data.get('id')
             current_name = item.text(0).split(' (')[0]
-            menu.addAction('新建灵感', lambda: self.new_data_requested.emit(cat_id))
+            menu.addAction(create_svg_icon('zap.svg'), '新建灵感', lambda: self.new_data_requested.emit(cat_id))
             menu.addSeparator()
-            menu.addAction('设置颜色', lambda: self._change_color(cat_id))
+            menu.addAction(create_svg_icon('palette.svg'), '设置颜色', lambda: self._change_color(cat_id))
             # [功能] 随机颜色
-            menu.addAction('随机颜色', lambda: self._set_random_color(cat_id))
-            menu.addAction('设置预设标签', lambda: self._set_preset_tags(cat_id))
+            menu.addAction(create_svg_icon('power.svg'), '随机颜色', lambda: self._set_random_color(cat_id))
+            menu.addAction(create_svg_icon('tag.svg'), '设置预设标签', lambda: self._set_preset_tags(cat_id))
             menu.addSeparator()
-            menu.addAction('新建分组', self._new_group)
-            menu.addAction('新建分区', lambda: self._new_zone(cat_id))
-            menu.addAction('重命名', lambda: self._rename_category(cat_id, current_name))
-            menu.addAction('删除', lambda: self._del_category(cat_id))
+            menu.addAction(create_svg_icon('action_add.svg'), '新建分组', self._new_group)
+            menu.addAction(create_svg_icon('action_add.svg'), '新建分区', lambda: self._new_zone(cat_id))
+            menu.addAction(create_svg_icon('action_edit.svg'), '重命名', lambda: self._rename_category(cat_id, current_name))
+            menu.addAction(create_svg_icon('win_close.svg'), '删除', lambda: self._del_category(cat_id))
         menu.exec_(sender_tree.mapToGlobal(pos))
 
     def _empty_trash(self):
