@@ -32,6 +32,7 @@ sys.excepthook = excepthook
 # 用于在主线程中接收全局热键信号
 class HotkeySignal(QObject):
     activated = pyqtSignal()
+    favorite_last_idea_activated = pyqtSignal()
 
 class AppManager(QObject):
     def __init__(self, app):
@@ -48,6 +49,22 @@ class AppManager(QObject):
         
         self.hotkey_signal = HotkeySignal()
         self.hotkey_signal.activated.connect(self.toggle_quick_window)
+        self.hotkey_signal.favorite_last_idea_activated.connect(self._favorite_last_idea)
+
+    def _favorite_last_idea(self):
+        try:
+            c = self.service.idea_repo.db.get_cursor()
+            c.execute("SELECT id FROM ideas WHERE is_deleted=0 ORDER BY created_at DESC LIMIT 1")
+            result = c.fetchone()
+
+            if result:
+                last_idea_id = result[0]
+                self.service.set_favorite(last_idea_id, True)
+                logging.info(f"Successfully favorited last idea with ID: {last_idea_id}")
+            else:
+                logging.info("No ideas found to favorite.")
+        except Exception as e:
+            logging.error(f"Error while favoriting last idea: {e}", exc_info=True)
 
     def start(self):
         # 注入 Service
@@ -83,6 +100,12 @@ class AppManager(QObject):
             logging.info("Global hotkey Alt+Space registered successfully")
         except Exception as e:
             logging.error(f"Failed to register hotkey Alt+Space: {e}", exc_info=True)
+
+        try:
+            keyboard.add_hotkey('ctrl+shift+e', lambda: self.hotkey_signal.favorite_last_idea_activated.emit(), suppress=False)
+            logging.info("Global hotkey Ctrl+Shift+E registered successfully")
+        except Exception as e:
+            logging.error(f"Failed to register hotkey Ctrl+Shift+E: {e}", exc_info=True)
 
         self.show_quick_window()
 
