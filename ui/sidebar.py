@@ -366,7 +366,7 @@ class Sidebar(QWidget):
             current_name = item.text(0).split(' (')[0]
             menu.addAction(create_svg_icon('zap.svg'), '新建灵感', lambda: self.new_data_requested.emit(cat_id))
             menu.addSeparator()
-            menu.addAction(create_svg_icon('palette.svg'), '设置颜色', lambda: self._change_color(cat_id))
+            menu.addAction(create_svg_icon('brain.svg'), '设置颜色', lambda: self._change_color(cat_id))
             # [功能] 随机颜色
             menu.addAction(create_svg_icon('power.svg'), '随机颜色', lambda: self._set_random_color(cat_id))
             menu.addAction(create_svg_icon('tag.svg'), '设置预设标签', lambda: self._set_preset_tags(cat_id))
