@@ -14,6 +14,7 @@ from core.container import AppContainer
 from core.signals import app_signals
 from core.keyboard_helper import HotkeyManager, HotkeySettingsWindow
 from core.time_paste_helper import TimePasteWindow
+from core.password_generator import PasswordGeneratorWindow
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
 from ui.toolbox_window import ToolboxWindow
@@ -53,6 +54,7 @@ class AppManager(QObject):
         self.hotkey_manager = None
         self.hotkey_settings_window = None
         self.time_paste_window = None
+        self.password_generator_window = None
         
         self.hotkey_signal = HotkeySignal()
         self.hotkey_signal.activated.connect(self.toggle_quick_window)
@@ -93,6 +95,7 @@ class AppManager(QObject):
         self.quick_window.toolbar.toolbox_requested.connect(self.toggle_toolbox_window)
         self.toolbox_window.show_hotkey_settings_requested.connect(self.show_hotkey_settings_window)
         self.toolbox_window.show_time_paste_requested.connect(self.toggle_time_paste_window)
+        self.toolbox_window.show_password_generator_requested.connect(self.toggle_password_generator_window)
 
         self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
         
@@ -105,6 +108,9 @@ class AppManager(QObject):
         
         # Time Paste Helper
         self.time_paste_window = TimePasteWindow()
+
+        # Password Generator
+        self.password_generator_window = PasswordGeneratorWindow()
 
         # --- [核心修复] 信号同步网络 ---
         # 1. 监听全局信号 -> 刷新所有窗口
@@ -257,6 +263,12 @@ class AppManager(QObject):
             self.time_paste_window.hide()
         else:
             self._force_activate(self.time_paste_window)
+
+    def toggle_password_generator_window(self):
+        if self.password_generator_window.isVisible():
+            self.password_generator_window.hide()
+        else:
+            self._force_activate(self.password_generator_window)
 
     def on_main_window_closing(self):
         if self.main_window: self.main_window.hide()

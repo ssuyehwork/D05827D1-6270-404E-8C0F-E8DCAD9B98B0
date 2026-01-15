@@ -7,6 +7,7 @@ from PyQt5.QtGui import QColor
 class ToolboxWindow(QWidget):
     show_hotkey_settings_requested = pyqtSignal()
     show_time_paste_requested = pyqtSignal()
+    show_password_generator_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -81,6 +82,11 @@ class ToolboxWindow(QWidget):
         time_paste_button.clicked.connect(self.show_time_paste_requested.emit)
         content_layout.addWidget(time_paste_button)
 
+        # Password Generator button
+        password_generator_button = QPushButton("密码生成器")
+        password_generator_button.setStyleSheet(hotkey_button.styleSheet()) # Reuse the same style
+        password_generator_button.clicked.connect(self.show_password_generator_requested.emit)
+        content_layout.addWidget(password_generator_button)
 
         content_layout.addStretch()
 
