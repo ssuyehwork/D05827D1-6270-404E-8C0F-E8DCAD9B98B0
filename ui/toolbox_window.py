@@ -1,10 +1,12 @@
 # ui/toolbox_window.py
 
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QGraphicsDropShadowEffect
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QGraphicsDropShadowEffect, QPushButton
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor
 
 class ToolboxWindow(QWidget):
+    show_hotkey_settings_requested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._drag_pos = None
@@ -14,7 +16,6 @@ class ToolboxWindow(QWidget):
             Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_DeleteOnClose)
 
         self._setup_ui()
 
@@ -49,13 +50,31 @@ class ToolboxWindow(QWidget):
         # 内容布局
         content_layout = QVBoxLayout(container)
         content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(15)
 
-        # 占位符
-        placeholder_label = QLabel("这是一个工具箱窗口")
-        placeholder_label.setAlignment(Qt.AlignCenter)
-        placeholder_label.setStyleSheet("color: #FFFFFF; font-size: 16px; border: none;")
+        # Hotkey settings button
+        hotkey_button = QPushButton("快捷键设定")
+        hotkey_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4A4A4A;
+                color: #E0E0E0;
+                border: 1px solid #666;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #5A5A5A;
+                border-color: #888;
+            }
+            QPushButton:pressed {
+                background-color: #3A3A3A;
+            }
+        """)
+        hotkey_button.clicked.connect(self.show_hotkey_settings_requested.emit)
+        content_layout.addWidget(hotkey_button)
 
-        content_layout.addWidget(placeholder_label)
+        content_layout.addStretch()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

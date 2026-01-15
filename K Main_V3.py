@@ -12,6 +12,7 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 # 导入核心组件
 from core.container import AppContainer
 from core.signals import app_signals
+from core.keyboard_helper import HotkeyManager, HotkeySettingsWindow
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
 from ui.toolbox_window import ToolboxWindow
@@ -48,6 +49,8 @@ class AppManager(QObject):
         self.toolbox_window = None
         self.ball = None
         self.tray_icon = None
+        self.hotkey_manager = None
+        self.hotkey_settings_window = None
         
         self.hotkey_signal = HotkeySignal()
         self.hotkey_signal.activated.connect(self.toggle_quick_window)
@@ -86,10 +89,16 @@ class AppManager(QObject):
         # Connect toolbox signals
         self.main_window.header.toolbox_requested.connect(self.toggle_toolbox_window)
         self.quick_window.toolbar.toolbox_requested.connect(self.toggle_toolbox_window)
+        self.toolbox_window.show_hotkey_settings_requested.connect(self.show_hotkey_settings_window)
 
         self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
         
         self._init_tray_icon()
+
+        # Keyboard Helper
+        self.hotkey_manager = HotkeyManager()
+        self.hotkey_manager.start()
+        self.hotkey_settings_window = HotkeySettingsWindow(self.hotkey_manager)
         
         # --- [核心修复] 信号同步网络 ---
         # 1. 监听全局信号 -> 刷新所有窗口
@@ -234,10 +243,15 @@ class AppManager(QObject):
                 quick_pos = self.quick_window.pos()
                 self.toolbox_window.move(quick_pos.x() - self.toolbox_window.width() - 10, quick_pos.y())
 
+    def show_hotkey_settings_window(self):
+        self._force_activate(self.hotkey_settings_window)
+
     def on_main_window_closing(self):
         if self.main_window: self.main_window.hide()
     def quit_application(self):
         logging.info("Application quit requested")
+        if self.hotkey_manager:
+            self.hotkey_manager.stop()
         try: keyboard.unhook_all()
         except: pass
         
