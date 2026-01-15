@@ -762,7 +762,8 @@ class MainWindow(QWidget):
                 if count >= 15: break
                 if cat_id in all_cats:
                     cat = all_cats[cat_id]
-                    action = cat_menu.addAction(create_svg_icon('branch.svg'), cat['name'])
+                    color = cat.get('color') or '#cccccc'
+                    action = cat_menu.addAction(create_svg_icon('branch.svg', color=color), cat['name'])
                     action.triggered.connect(lambda _, cid=cat['id']: self._move_to_category(cid))
                     count += 1
             menu.addSeparator()
