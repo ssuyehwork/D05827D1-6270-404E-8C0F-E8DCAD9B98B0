@@ -6,6 +6,7 @@ from PyQt5.QtGui import QColor
 
 class ToolboxWindow(QWidget):
     show_hotkey_settings_requested = pyqtSignal()
+    show_time_paste_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,6 +74,13 @@ class ToolboxWindow(QWidget):
         """)
         hotkey_button.clicked.connect(self.show_hotkey_settings_requested.emit)
         content_layout.addWidget(hotkey_button)
+
+        # Time Paste button
+        time_paste_button = QPushButton("时间输出")
+        time_paste_button.setStyleSheet(hotkey_button.styleSheet()) # Reuse the same style
+        time_paste_button.clicked.connect(self.show_time_paste_requested.emit)
+        content_layout.addWidget(time_paste_button)
+
 
         content_layout.addStretch()
 

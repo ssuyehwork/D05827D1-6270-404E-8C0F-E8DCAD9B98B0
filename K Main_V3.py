@@ -13,6 +13,7 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from core.container import AppContainer
 from core.signals import app_signals
 from core.keyboard_helper import HotkeyManager, HotkeySettingsWindow
+from core.time_paste_helper import TimePasteWindow
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
 from ui.toolbox_window import ToolboxWindow
@@ -51,6 +52,7 @@ class AppManager(QObject):
         self.tray_icon = None
         self.hotkey_manager = None
         self.hotkey_settings_window = None
+        self.time_paste_window = None
         
         self.hotkey_signal = HotkeySignal()
         self.hotkey_signal.activated.connect(self.toggle_quick_window)
@@ -90,6 +92,7 @@ class AppManager(QObject):
         self.main_window.header.toolbox_requested.connect(self.toggle_toolbox_window)
         self.quick_window.toolbar.toolbox_requested.connect(self.toggle_toolbox_window)
         self.toolbox_window.show_hotkey_settings_requested.connect(self.show_hotkey_settings_window)
+        self.toolbox_window.show_time_paste_requested.connect(self.toggle_time_paste_window)
 
         self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
         
@@ -100,6 +103,9 @@ class AppManager(QObject):
         self.hotkey_manager.start()
         self.hotkey_settings_window = HotkeySettingsWindow(self.hotkey_manager)
         
+        # Time Paste Helper
+        self.time_paste_window = TimePasteWindow()
+
         # --- [核心修复] 信号同步网络 ---
         # 1. 监听全局信号 -> 刷新所有窗口
         app_signals.data_changed.connect(self.main_window._refresh_all)
@@ -245,6 +251,12 @@ class AppManager(QObject):
 
     def show_hotkey_settings_window(self):
         self._force_activate(self.hotkey_settings_window)
+
+    def toggle_time_paste_window(self):
+        if self.time_paste_window.isVisible():
+            self.time_paste_window.hide()
+        else:
+            self._force_activate(self.time_paste_window)
 
     def on_main_window_closing(self):
         if self.main_window: self.main_window.hide()
