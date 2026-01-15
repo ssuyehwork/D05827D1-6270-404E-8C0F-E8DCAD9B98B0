@@ -718,7 +718,7 @@ class MainWindow(QWidget):
         if not data: return
         
         menu = QMenu(self)
-        menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_mid']}; color: white; border: 1px solid {COLORS['bg_light']}; border-radius: 6px; padding: 4px; }} QMenu::item {{ padding: 6px 10px 6px 22px; border-radius: 4px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }} QMenu::separator {{ height: 1px; background: {COLORS['bg_light']}; margin: 4px 0px; }} QMenu::icon {{ position: absolute; left: 6px; top: 6px; }}")
+        menu.setStyleSheet(f"QMenu {{ background-color: {COLORS['bg_mid']}; color: white; border: 1px solid {COLORS['bg_light']}; border-radius: 6px; padding: 4px; }} QMenu::item {{ padding: 6px 10px 6px 30px; border-radius: 4px; }} QMenu::item:selected {{ background-color: {COLORS['primary']}; }} QMenu::separator {{ height: 1px; background: {COLORS['bg_light']}; margin: 4px 0px; }} QMenu::icon {{ position: absolute; left: 6px; top: 6px; }}")
         
         in_trash = (self.curr_filter[0] == 'trash')
         is_locked = data['is_locked']
