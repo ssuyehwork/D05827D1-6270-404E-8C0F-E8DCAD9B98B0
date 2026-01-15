@@ -90,8 +90,8 @@ class PasswordGeneratorWindow(QWidget):
 
         # --- Content Area ---
         content_layout = QVBoxLayout()
-        content_layout.setContentsMargins(20, 0, 20, 20)
-        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(20, 5, 20, 15)
+        content_layout.setSpacing(10)
 
         self.usage_entry = QLineEdit()
         self.usage_entry.setPlaceholderText("Account / Usage (e.g. GitHub, Gmail...)")
@@ -107,9 +107,10 @@ class PasswordGeneratorWindow(QWidget):
 
         self.generate_btn = QPushButton("Generate Password")
         self.generate_btn.setFixedHeight(40)
+        self.generate_btn.setFixedWidth(200)
         self.generate_btn.setStyleSheet("QPushButton { background-color: #2cc985; color: white; border: none; border-radius: 20px; font-size: 13px; font-weight: bold; } QPushButton:hover { background-color: #229c67; }")
         self.generate_btn.clicked.connect(self._generate_password)
-        content_layout.addWidget(self.generate_btn)
+        content_layout.addWidget(self.generate_btn, alignment=Qt.AlignCenter)
 
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -164,33 +165,73 @@ class PasswordGeneratorWindow(QWidget):
     def _create_controls_area(self):
         frame = QWidget()
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 5, 0, 5)
+        layout.setSpacing(10)
 
         length_label = QLabel("Length: 16")
-        length_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        length_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #cccccc;")
 
         length_slider = QSlider(Qt.Horizontal)
         length_slider.setRange(8, 64)
         length_slider.setValue(16)
         length_slider.valueChanged.connect(lambda v: length_label.setText(f"Length: {v}"))
+        length_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #444;
+                height: 4px;
+                background: #333;
+                margin: 2px 0;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background-color: #3b8ed0;
+                border: 5px solid #1e1e1e;
+                width: 18px;
+                height: 18px;
+                margin: -7px 0;
+                border-radius: 9px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #3b8ed0;
+                border-radius: 2px;
+            }
+        """)
 
         checks_frame = QWidget()
         checks_layout = QHBoxLayout(checks_frame)
-        checks_layout.setContentsMargins(0, 0, 0, 0)
+        checks_layout.setContentsMargins(10, 0, 10, 0)
 
-        cb_style = "QCheckBox { spacing: 5px; font-size: 12px; font-weight: bold; } QCheckBox::indicator { width: 20px; height: 20px; border: 2px solid #444; border-radius: 6px; } QCheckBox::indicator:checked { background-color: #2cc985; border-color: #2cc985; } "
-        check_upper = QCheckBox("A-Z"); check_upper.setChecked(True); check_upper.setStyleSheet(cb_style)
-        check_lower = QCheckBox("a-z"); check_lower.setChecked(True); check_lower.setStyleSheet(cb_style)
-        check_digits = QCheckBox("0-9"); check_digits.setChecked(True); check_digits.setStyleSheet(cb_style)
-        check_symbols = QCheckBox("@#$"); check_symbols.setChecked(True); check_symbols.setStyleSheet(cb_style)
+        checkmark_svg_base64 = "PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZmlsbD0nbm9uZScgc3Ryb2tlPSd3aGl0ZScgc3Ryb2tlLXdpZHRoPSczJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnIGQ9J001IDEzbDQgNEwxOSA3Jy8+PC9zdmc+"
 
+        cb_style_main = f"""
+            QCheckBox {{ spacing: 8px; font-size: 12px; font-weight: bold; color: #cccccc; }}
+            QCheckBox::indicator {{ width: 18px; height: 18px; border: 2px solid #555; border-radius: 5px; background-color: transparent; }}
+            QCheckBox::indicator:hover {{ border-color: #2cc985; }}
+            QCheckBox::indicator:checked {{ background-color: #2cc985; border-color: #2cc985; image: url(data:image/svg+xml;base64,{checkmark_svg_base64}); }}
+        """
+        check_upper = QCheckBox("A-Z"); check_upper.setChecked(True); check_upper.setStyleSheet(cb_style_main)
+        check_lower = QCheckBox("a-z"); check_lower.setChecked(True); check_lower.setStyleSheet(cb_style_main)
+        check_digits = QCheckBox("0-9"); check_digits.setChecked(True); check_digits.setStyleSheet(cb_style_main)
+        check_symbols = QCheckBox("@#$"); check_symbols.setChecked(True); check_symbols.setStyleSheet(cb_style_main)
+
+        checks_layout.addStretch()
         checks_layout.addWidget(check_upper)
+        checks_layout.addStretch()
         checks_layout.addWidget(check_lower)
+        checks_layout.addStretch()
         checks_layout.addWidget(check_digits)
+        checks_layout.addStretch()
         checks_layout.addWidget(check_symbols)
+        checks_layout.addStretch()
 
+        cb_style_exclude = f"""
+            QCheckBox {{ spacing: 8px; font-size: 11px; color: #cccccc; }}
+            QCheckBox::indicator {{ width: 16px; height: 16px; border: 2px solid #555; border-radius: 4px; background-color: transparent; }}
+            QCheckBox::indicator:hover {{ border-color: #3b8ed0; }}
+            QCheckBox::indicator:checked {{ background-color: #3b8ed0; border-color: #3b8ed0; image: url(data:image/svg+xml;base64,{checkmark_svg_base64}); }}
+        """
         exclude_ambiguous_check = QCheckBox("排除相似字符 (0O1lI)")
-        exclude_ambiguous_check.setStyleSheet("QCheckBox { spacing: 5px; font-size: 11px; } QCheckBox::indicator { width: 18px; height: 18px; border: 2px solid #444; border-radius: 6px; } QCheckBox::indicator:checked { background-color: #3b8ed0; border-color: #3b8ed0; }")
+        exclude_ambiguous_check.setStyleSheet(cb_style_exclude)
 
         layout.addWidget(length_label)
         layout.addWidget(length_slider)
