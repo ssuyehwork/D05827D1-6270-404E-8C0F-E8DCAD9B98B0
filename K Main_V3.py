@@ -60,6 +60,50 @@ class AppManager(QObject):
         self.hotkey_signal.activated.connect(self.toggle_quick_window)
         self.hotkey_signal.favorite_last_idea_activated.connect(self._favorite_last_idea)
 
+    def _show_toolbox_context_menu(self, pos):
+        menu = QMenu()
+        # 保持与其他菜单风格一致
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2b2b2b;
+                color: #f0f0f0;
+                border: 1px solid #444;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 6px 20px 6px 10px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #5D4037;
+            }
+            QMenu::separator {
+                background-color: #444;
+                height: 1px;
+                margin: 4px 0;
+            }
+        """)
+
+        features = {
+            'shift_space': "Shift + Space → 换行",
+            'ctrl_shift_space': "Ctrl + Shift + Space → 清空",
+            'capslock': "CapsLock → 回车",
+            'backtick_backspace': "` (反引号) → 退格"
+        }
+
+        for key, text in features.items():
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(self.hotkey_manager.feature_enabled.get(key, False))
+            action.toggled.connect(lambda checked, k=key: self.hotkey_manager.toggle_feature(k, checked))
+
+        menu.addSeparator()
+        settings_action = menu.addAction("打开详细设置...")
+        settings_action.triggered.connect(self.show_hotkey_settings_window)
+
+        menu.exec_(pos)
+
     def _favorite_last_idea(self):
         try:
             c = self.service.idea_repo.db.get_cursor()
@@ -92,7 +136,9 @@ class AppManager(QObject):
         
         # Connect toolbox signals
         self.main_window.header.toolbox_requested.connect(self.toggle_toolbox_window)
+        self.main_window.header.toolbox_context_menu_requested.connect(self._show_toolbox_context_menu)
         self.quick_window.toolbar.toolbox_requested.connect(self.toggle_toolbox_window)
+        self.quick_window.toolbar.toolbox_context_menu_requested.connect(self._show_toolbox_context_menu)
         self.toolbox_window.show_hotkey_settings_requested.connect(self.show_hotkey_settings_window)
         self.toolbox_window.show_time_paste_requested.connect(self.toggle_time_paste_window)
         self.toolbox_window.show_password_generator_requested.connect(self.toggle_password_generator_window)

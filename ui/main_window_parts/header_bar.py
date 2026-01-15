@@ -2,7 +2,7 @@
 # ui/main_window_parts/header_bar.py
 
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtGui import QIntValidator, QIcon, QPalette
 from core.config import STYLES, COLORS
 from ui.utils import create_svg_icon, create_clear_button_icon
@@ -23,6 +23,7 @@ class HeaderBar(QWidget):
     new_idea_requested = pyqtSignal()
     refresh_requested = pyqtSignal()
     toolbox_requested = pyqtSignal()
+    toolbox_context_menu_requested = pyqtSignal(QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -153,8 +154,12 @@ class HeaderBar(QWidget):
         self.toggle_meta_btn = self._create_btn('sidebar_right.svg', "元数据面板 (Ctrl+I)", func_btn_style + f" QPushButton:checked {{ background-color: {COLORS['primary']}; }}", checkable=True)
         self.toggle_meta_btn.toggled.connect(self.toggle_metadata.emit)
 
-        toolbox_btn = self._create_btn('toolbox.svg', "工具箱", func_btn_style)
+        toolbox_btn = self._create_btn('toolbox.svg', "工具箱 (右键快捷设置)", func_btn_style)
         toolbox_btn.clicked.connect(self.toolbox_requested.emit)
+        toolbox_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        toolbox_btn.customContextMenuRequested.connect(
+            lambda pos: self.toolbox_context_menu_requested.emit(toolbox_btn.mapToGlobal(pos))
+        )
 
         layout.addWidget(self.filter_btn); layout.addSpacing(4)
         layout.addWidget(new_btn); layout.addSpacing(4)
