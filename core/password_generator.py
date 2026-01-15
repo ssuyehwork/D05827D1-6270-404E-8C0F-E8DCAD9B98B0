@@ -3,9 +3,60 @@
 import string
 import secrets
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                             QLineEdit, QSlider, QCheckBox, QProgressBar, QApplication, QToolTip)
+                             QLineEdit, QSlider, QCheckBox, QProgressBar, QApplication)
 from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPainterPath
+from ui import utils
+
+class ColoredTooltip(QWidget):
+    def __init__(self, parent, text, bg_color="#ef4444", text_color="white"):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        container = QWidget(self)
+        container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {bg_color};
+                border-radius: 8px;
+            }}
+        """)
+
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(10, 6, 12, 6)
+
+        icon_label = QLabel()
+        icon_pixmap = utils.create_svg_icon('alert-triangle.svg', 'white').pixmap(16, 16)
+        icon_label.setPixmap(icon_pixmap)
+        layout.addWidget(icon_label)
+
+        label = QLabel(text)
+        label.setStyleSheet(f"""
+            QLabel {{
+                background-color: transparent;
+                color: {text_color};
+                font-size: 11px;
+                font-weight: bold;
+            }}
+        """)
+        layout.addWidget(label)
+
+        # Set main layout for the tooltip widget itself
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0,0,0,0)
+        main_layout.addWidget(container)
+
+        self.adjustSize()
+
+    def show_tooltip(self):
+        parent_widget = self.parentWidget()
+        pos = parent_widget.mapToGlobal(QPoint(0,0))
+        x = pos.x() + (parent_widget.width() - self.width()) // 2
+        y = pos.y() - self.height() - 5
+        self.move(x, y)
+        self.show()
+        QTimer.singleShot(1500, self.close)
+
 
 def generate_secure_password(length, use_upper, use_lower, use_digits, use_symbols, exclude_ambiguous=False):
     char_pool = ""
@@ -243,13 +294,16 @@ class PasswordGeneratorWindow(QWidget):
     def _generate_password(self):
         usage_text = self.usage_entry.text().strip()
         if not usage_text:
-            self.usage_entry.setStyleSheet(self.usage_entry.styleSheet().replace("border: 1px solid #333333;", "border: 1px solid #ef4444;"))
-            QToolTip.showText(self.usage_entry.mapToGlobal(QPoint(0,0)), "⚠️ 请输入账号备注信息！", self.usage_entry)
-            QTimer.singleShot(1500, lambda: self.usage_entry.setStyleSheet(self.usage_entry.styleSheet().replace("border: 1px solid #ef4444;", "border: 1px solid #333333;")))
+            original_style = self.usage_entry.styleSheet()
+            self.usage_entry.setStyleSheet(original_style.replace("border: 1px solid #333333;", "border: 1px solid #ef4444;"))
+            tooltip = ColoredTooltip(self.usage_entry, "请输入账号备注信息！")
+            tooltip.show_tooltip()
+            QTimer.singleShot(1500, lambda: self.usage_entry.setStyleSheet(original_style))
             return
 
         if not any([self.check_upper.isChecked(), self.check_lower.isChecked(), self.check_digits.isChecked(), self.check_symbols.isChecked()]):
-            QToolTip.showText(self.generate_btn.mapToGlobal(QPoint(0,0)), "⚠️ 至少选择一种字符类型！", self.generate_btn)
+            tooltip = ColoredTooltip(self.generate_btn, "至少选择一种字符类型！", bg_color="#f59e0b")
+            tooltip.show_tooltip()
             return
 
         length = self.length_slider.value()
