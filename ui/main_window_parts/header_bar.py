@@ -22,6 +22,7 @@ class HeaderBar(QWidget):
     toggle_metadata = pyqtSignal(bool)
     new_idea_requested = pyqtSignal()
     refresh_requested = pyqtSignal()
+    toolbox_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -152,9 +153,14 @@ class HeaderBar(QWidget):
         self.toggle_meta_btn = self._create_btn('sidebar_right.svg', "元数据面板 (Ctrl+I)", func_btn_style + f" QPushButton:checked {{ background-color: {COLORS['primary']}; }}", checkable=True)
         self.toggle_meta_btn.toggled.connect(self.toggle_metadata.emit)
 
+        toolbox_btn = self._create_btn('toolbox.svg', "工具箱", func_btn_style)
+        toolbox_btn.clicked.connect(self.toolbox_requested.emit)
+
         layout.addWidget(self.filter_btn); layout.addSpacing(4)
         layout.addWidget(new_btn); layout.addSpacing(4)
-        layout.addWidget(self.toggle_meta_btn); layout.addSpacing(12)
+        layout.addWidget(self.toggle_meta_btn); layout.addSpacing(4)
+        layout.addWidget(toolbox_btn); layout.addSpacing(12)
+
 
         # 5. Window Controls
         min_btn = self._create_btn('win_min.svg', "最小化", func_btn_style)

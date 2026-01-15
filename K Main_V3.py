@@ -14,6 +14,7 @@ from core.container import AppContainer
 from core.signals import app_signals
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
+from ui.toolbox_window import ToolboxWindow
 from ui.ball import FloatingBall
 from core.settings import load_setting
 from ui.utils import create_svg_icon
@@ -44,6 +45,7 @@ class AppManager(QObject):
         
         self.main_window = None
         self.quick_window = None
+        self.toolbox_window = None
         self.ball = None
         self.tray_icon = None
         
@@ -79,6 +81,12 @@ class AppManager(QObject):
         self.quick_window = QuickWindow(self.service) 
         self.quick_window.toggle_main_window_requested.connect(self.toggle_main_window)
         
+        self.toolbox_window = ToolboxWindow()
+
+        # Connect toolbox signals
+        self.main_window.header.toolbox_requested.connect(self.toggle_toolbox_window)
+        self.quick_window.toolbar.toolbox_requested.connect(self.toggle_toolbox_window)
+
         self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
         
         self._init_tray_icon()
@@ -215,6 +223,17 @@ class AppManager(QObject):
     def toggle_main_window(self):
         if self.main_window.isVisible() and not self.main_window.isMinimized(): self.main_window.hide()
         else: self.show_main_window()
+
+    def toggle_toolbox_window(self):
+        if self.toolbox_window.isVisible():
+            self.toolbox_window.hide()
+        else:
+            self._force_activate(self.toolbox_window)
+            # Position it near the quick window for context
+            if self.quick_window.isVisible():
+                quick_pos = self.quick_window.pos()
+                self.toolbox_window.move(quick_pos.x() - self.toolbox_window.width() - 10, quick_pos.y())
+
     def on_main_window_closing(self):
         if self.main_window: self.main_window.hide()
     def quit_application(self):
