@@ -2,7 +2,7 @@
 # ui/quick_window_parts/toolbar.py
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel)
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QPoint
 from PyQt5.QtGui import QIcon, QTransform, QIntValidator
 
 from ui.utils import create_svg_icon
@@ -19,6 +19,7 @@ class Toolbar(QWidget):
     jump_to_page_requested = pyqtSignal(int)
     refresh_requested = pyqtSignal()
     toolbox_requested = pyqtSignal()
+    toolbox_context_menu_requested = pyqtSignal(QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,7 +59,11 @@ class Toolbar(QWidget):
         layout.addWidget(self.btn_refresh)
 
         # Add toolbox button
-        self.btn_toolbox = self._create_button('toolbox.svg', '#aaa', "ToolButton", "工具箱", self.toolbox_requested.emit)
+        self.btn_toolbox = self._create_button('toolbox.svg', '#aaa', "ToolButton", "工具箱 (右键快捷设置)", self.toolbox_requested.emit)
+        self.btn_toolbox.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.btn_toolbox.customContextMenuRequested.connect(
+            lambda pos: self.toolbox_context_menu_requested.emit(self.btn_toolbox.mapToGlobal(pos))
+        )
         layout.addWidget(self.btn_toolbox)
 
         layout.addSpacing(10)
