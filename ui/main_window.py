@@ -746,14 +746,14 @@ class MainWindow(QWidget):
             menu.addAction(create_svg_icon('pin_vertical.svg', '#e74c3c') if data['is_pinned'] else create_svg_icon('pin_tilted.svg', '#aaaaaa'), '取消置顶' if data['is_pinned'] else '置顶', self._do_pin)
             menu.addAction(create_svg_icon('bookmark.svg', '#ff6b81'), '取消书签' if data['is_favorite'] else '添加书签', self._do_fav)
             menu.addSeparator()
-            cat_menu = menu.addMenu(create_svg_icon('nav_next.svg', '#cccccc'), '移动到分类')
+            cat_menu = menu.addMenu('移动到分类')
             
             # [优化] 仅显示最近使用的 15 个分类
             recent_cats = load_setting('recent_categories', [])
             all_cats = {c['id']: c for c in self.service.get_categories()}
             
             # 添加固定的“未分类”选项
-            action_uncategorized = cat_menu.addAction('未分类')
+            action_uncategorized = cat_menu.addAction(create_svg_icon('uncategorized.svg'), '未分类')
             action_uncategorized.triggered.connect(lambda: self._move_to_category(None))
 
             # 添加最近使用且仍然存在的分类
@@ -762,7 +762,7 @@ class MainWindow(QWidget):
                 if count >= 15: break
                 if cat_id in all_cats:
                     cat = all_cats[cat_id]
-                    action = cat_menu.addAction(cat['name'])
+                    action = cat_menu.addAction(create_svg_icon('branch.svg'), cat['name'])
                     action.triggered.connect(lambda _, cid=cat['id']: self._move_to_category(cid))
                     count += 1
             menu.addSeparator()
