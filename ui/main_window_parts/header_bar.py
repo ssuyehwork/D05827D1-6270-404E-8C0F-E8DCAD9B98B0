@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ui/main_window_parts/header_bar.py
 
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication, QMenu, QAction
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIntValidator, QIcon, QPalette
 from core.config import STYLES, COLORS
@@ -23,9 +23,11 @@ class HeaderBar(QWidget):
     new_idea_requested = pyqtSignal()
     refresh_requested = pyqtSignal()
     toolbox_requested = pyqtSignal()
+    global_hotkeys_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.hotkeys_enabled = True
         self.setFixedHeight(40)
         self.setStyleSheet(f"""
             QWidget {{
@@ -153,13 +155,16 @@ class HeaderBar(QWidget):
         self.toggle_meta_btn = self._create_btn('sidebar_right.svg', "元数据面板 (Ctrl+I)", func_btn_style + f" QPushButton:checked {{ background-color: {COLORS['primary']}; }}", checkable=True)
         self.toggle_meta_btn.toggled.connect(self.toggle_metadata.emit)
 
-        toolbox_btn = self._create_btn('toolbox.svg', "工具箱", func_btn_style)
-        toolbox_btn.clicked.connect(self.toolbox_requested.emit)
+        self.toolbox_btn = self._create_btn('toolbox.svg', "工具箱", func_btn_style)
+        self.toolbox_btn.clicked.connect(self.toolbox_requested.emit)
+        self.toolbox_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.toolbox_btn.customContextMenuRequested.connect(self._show_toolbox_menu)
+
 
         layout.addWidget(self.filter_btn); layout.addSpacing(4)
         layout.addWidget(new_btn); layout.addSpacing(4)
         layout.addWidget(self.toggle_meta_btn); layout.addSpacing(4)
-        layout.addWidget(toolbox_btn); layout.addSpacing(12)
+        layout.addWidget(self.toolbox_btn); layout.addSpacing(12)
 
 
         # 5. Window Controls
@@ -234,3 +239,17 @@ class HeaderBar(QWidget):
         icon = QApplication.windowIcon()
         if not icon.isNull():
             self.app_logo.setPixmap(icon.pixmap(20, 20))
+
+    def _show_toolbox_menu(self, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet(f"QMenu {{ background-color: #2D2D2D; color: #EEE; border: 1px solid #444; }} QMenu::item {{ padding: 6px 24px; }} QMenu::item:selected {{ background-color: #4a90e2; }}")
+
+        action = QAction("快捷键设置", self, checkable=True)
+        action.setChecked(self.hotkeys_enabled)
+        action.toggled.connect(self.global_hotkeys_toggled.emit)
+
+        menu.addAction(action)
+        menu.exec_(self.toolbox_btn.mapToGlobal(pos))
+
+    def set_hotkeys_enabled_state(self, enabled):
+        self.hotkeys_enabled = enabled

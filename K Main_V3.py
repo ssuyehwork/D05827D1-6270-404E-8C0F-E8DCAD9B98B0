@@ -105,7 +105,17 @@ class AppManager(QObject):
         self.hotkey_manager = HotkeyManager()
         self.hotkey_manager.start()
         self.hotkey_settings_window = HotkeySettingsWindow(self.hotkey_manager)
+
+        # Connect global hotkey toggle signals
+        self.main_window.header.global_hotkeys_toggled.connect(self.hotkey_manager.toggle_global_status)
+        self.quick_window.toolbar.global_hotkeys_toggled.connect(self.hotkey_manager.toggle_global_status)
+        self.hotkey_manager.status_changed.connect(self.main_window.header.set_hotkeys_enabled_state)
+        self.hotkey_manager.status_changed.connect(self.quick_window.toolbar.set_hotkeys_enabled_state)
         
+        # Set initial state
+        self.main_window.header.set_hotkeys_enabled_state(self.hotkey_manager.is_globally_enabled)
+        self.quick_window.toolbar.set_hotkeys_enabled_state(self.hotkey_manager.is_globally_enabled)
+
         # Time Paste Helper
         self.time_paste_window = TimePasteWindow()
 

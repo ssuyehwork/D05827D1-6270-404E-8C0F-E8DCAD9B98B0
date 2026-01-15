@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # ui/quick_window_parts/toolbar.py
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel)
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QMenu, QAction)
 from PyQt5.QtCore import Qt, pyqtSignal, QSize
 from PyQt5.QtGui import QIcon, QTransform, QIntValidator
 
@@ -19,9 +19,11 @@ class Toolbar(QWidget):
     jump_to_page_requested = pyqtSignal(int)
     refresh_requested = pyqtSignal()
     toolbox_requested = pyqtSignal()
+    global_hotkeys_toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.hotkeys_enabled = True
         self.setObjectName("RightToolbar")
         self.setFixedWidth(40)
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -59,6 +61,8 @@ class Toolbar(QWidget):
 
         # Add toolbox button
         self.btn_toolbox = self._create_button('toolbox.svg', '#aaa', "ToolButton", "工具箱", self.toolbox_requested.emit)
+        self.btn_toolbox.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.btn_toolbox.customContextMenuRequested.connect(self._show_toolbox_menu)
         layout.addWidget(self.btn_toolbox)
 
         layout.addSpacing(10)
@@ -136,3 +140,17 @@ class Toolbar(QWidget):
         self.lbl_total_pages.setText(str(total_pages))
         self.btn_prev_page.setDisabled(current_page <= 1)
         self.btn_next_page.setDisabled(current_page >= total_pages)
+
+    def _show_toolbox_menu(self, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet(f"QMenu {{ background-color: #2D2D2D; color: #EEE; border: 1px solid #444; }} QMenu::item {{ padding: 6px 24px; }} QMenu::item:selected {{ background-color: #4a90e2; }}")
+
+        action = QAction("快捷键设置", self, checkable=True)
+        action.setChecked(self.hotkeys_enabled)
+        action.toggled.connect(self.global_hotkeys_toggled.emit)
+
+        menu.addAction(action)
+        menu.exec_(self.btn_toolbox.mapToGlobal(pos))
+
+    def set_hotkeys_enabled_state(self, enabled):
+        self.hotkeys_enabled = enabled

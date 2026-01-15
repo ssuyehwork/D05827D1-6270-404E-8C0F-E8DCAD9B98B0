@@ -4,12 +4,16 @@ import time
 import keyboard
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QCheckBox)
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal
+from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QObject
 from PyQt5.QtGui import QPainter, QColor, QPainterPath
 from core.settings import load_setting, save_setting
 
-class HotkeyManager:
+class HotkeyManager(QObject):
+    status_changed = pyqtSignal(bool)
+
     def __init__(self):
+        super().__init__()
+        self.is_globally_enabled = load_setting('hotkeys_globally_enabled', True)
         self.feature_enabled = {
             'shift_space': load_setting('hotkey_shift_space', True),
             'ctrl_shift_space': load_setting('hotkey_ctrl_shift_space', True),
@@ -19,13 +23,22 @@ class HotkeyManager:
         self.hook = None
 
     def start(self):
-        if self.hook is None:
+        if self.hook is None and self.is_globally_enabled:
             self.hook = keyboard.hook(self._key_handler, suppress=True)
 
     def stop(self):
         if self.hook:
             keyboard.unhook(self.hook)
             self.hook = None
+
+    def toggle_global_status(self, enabled):
+        self.is_globally_enabled = enabled
+        save_setting('hotkeys_globally_enabled', enabled)
+        if enabled:
+            self.start()
+        else:
+            self.stop()
+        self.status_changed.emit(enabled)
 
     def toggle_feature(self, feature, enabled):
         if feature in self.feature_enabled:
