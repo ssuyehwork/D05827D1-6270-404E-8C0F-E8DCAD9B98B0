@@ -12,8 +12,12 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 # 导入核心组件
 from core.container import AppContainer
 from core.signals import app_signals
+from core.keyboard_helper import HotkeyManager, HotkeySettingsWindow
+from core.time_paste_helper import TimePasteWindow
+from core.password_generator import PasswordGeneratorWindow
 from ui.quick_window import QuickWindow
 from ui.main_window import MainWindow
+from ui.toolbox_window import ToolboxWindow
 from ui.ball import FloatingBall
 from core.settings import load_setting
 from ui.utils import create_svg_icon
@@ -44,8 +48,13 @@ class AppManager(QObject):
         
         self.main_window = None
         self.quick_window = None
+        self.toolbox_window = None
         self.ball = None
         self.tray_icon = None
+        self.hotkey_manager = None
+        self.hotkey_settings_window = None
+        self.time_paste_window = None
+        self.password_generator_window = None
         
         self.hotkey_signal = HotkeySignal()
         self.hotkey_signal.activated.connect(self.toggle_quick_window)
@@ -79,10 +88,30 @@ class AppManager(QObject):
         self.quick_window = QuickWindow(self.service) 
         self.quick_window.toggle_main_window_requested.connect(self.toggle_main_window)
         
+        self.toolbox_window = ToolboxWindow()
+        
+        # Connect toolbox signals
+        self.main_window.header.toolbox_requested.connect(self.toggle_toolbox_window)
+        self.quick_window.toolbar.toolbox_requested.connect(self.toggle_toolbox_window)
+        self.toolbox_window.show_hotkey_settings_requested.connect(self.show_hotkey_settings_window)
+        self.toolbox_window.show_time_paste_requested.connect(self.toggle_time_paste_window)
+        self.toolbox_window.show_password_generator_requested.connect(self.toggle_password_generator_window)
+
         self.quick_window.cm.data_captured.connect(self._on_clipboard_data_captured)
         
         self._init_tray_icon()
+
+        # Keyboard Helper
+        self.hotkey_manager = HotkeyManager()
+        self.hotkey_manager.start()
+        self.hotkey_settings_window = HotkeySettingsWindow(self.hotkey_manager)
         
+        # Time Paste Helper
+        self.time_paste_window = TimePasteWindow()
+
+        # Password Generator
+        self.password_generator_window = PasswordGeneratorWindow()
+
         # --- [核心修复] 信号同步网络 ---
         # 1. 监听全局信号 -> 刷新所有窗口
         app_signals.data_changed.connect(self.main_window._refresh_all)
@@ -215,10 +244,38 @@ class AppManager(QObject):
     def toggle_main_window(self):
         if self.main_window.isVisible() and not self.main_window.isMinimized(): self.main_window.hide()
         else: self.show_main_window()
+
+    def toggle_toolbox_window(self):
+        if self.toolbox_window.isVisible():
+            self.toolbox_window.hide()
+        else:
+            self._force_activate(self.toolbox_window)
+            # Position it near the quick window for context
+            if self.quick_window.isVisible():
+                quick_pos = self.quick_window.pos()
+                self.toolbox_window.move(quick_pos.x() - self.toolbox_window.width() - 10, quick_pos.y())
+
+    def show_hotkey_settings_window(self):
+        self._force_activate(self.hotkey_settings_window)
+
+    def toggle_time_paste_window(self):
+        if self.time_paste_window.isVisible():
+            self.time_paste_window.hide()
+        else:
+            self._force_activate(self.time_paste_window)
+
+    def toggle_password_generator_window(self):
+        if self.password_generator_window.isVisible():
+            self.password_generator_window.hide()
+        else:
+            self._force_activate(self.password_generator_window)
+
     def on_main_window_closing(self):
         if self.main_window: self.main_window.hide()
     def quit_application(self):
         logging.info("Application quit requested")
+        if self.hotkey_manager:
+            self.hotkey_manager.stop()
         try: keyboard.unhook_all()
         except: pass
         
