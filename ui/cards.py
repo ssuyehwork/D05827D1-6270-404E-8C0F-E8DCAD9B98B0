@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QApplicati
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QSize, QPoint
 from PyQt5.QtGui import QDrag, QPixmap, QImage, QPainter
 from core.config import STYLES, COLORS
-from ui.utils import create_svg_icon
+from ui.utils import create_svg_icon, create_svg_data_uri
 
 class IdeaCard(QFrame):
     selection_requested = pyqtSignal(int, bool, bool)
@@ -83,15 +83,11 @@ class IdeaCard(QFrame):
         # 3. 底部区域
         bot_layout = QHBoxLayout()
         bot_layout.setSpacing(6)
-
-        self.time_icon = QLabel()
-        self.time_icon.setStyleSheet("background: transparent;")
         
         self.time_label = QLabel()
         self.time_label.setStyleSheet("color:rgba(255,255,255,100); font-size:12px; background:transparent;")
         self.time_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         
-        bot_layout.addWidget(self.time_icon)
         bot_layout.addWidget(self.time_label)
         bot_layout.addStretch() 
         
@@ -168,9 +164,21 @@ class IdeaCard(QFrame):
             content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Minimum)
             self.content_layout.addWidget(content)
 
-        # 时间 (带时钟符号)
-        self.time_icon.setPixmap(create_svg_icon("clock.svg", "rgba(255,255,255,100)").pixmap(12, 12))
-        self.time_label.setText(f'{self.data["updated_at"][:16]}')
+        # 时间 (带时钟符号) - 使用富文本彻底解决对齐问题
+        time_color = "rgba(255,255,255,100)"
+        clock_icon_uri = create_svg_data_uri("clock.svg", time_color)
+        date_str = self.data["updated_at"][:16]
+
+        # 使用简单的 table 来确保图标和文本在同一行且间距固定
+        rich_text = f"""
+        <table style='color: {time_color};'>
+            <tr>
+                <td><img src='{clock_icon_uri}' width='12' height='12' /></td>
+                <td style='padding-left: 4px;'>{date_str}</td>
+            </tr>
+        </table>
+        """
+        self.time_label.setText(rich_text)
         
         # 标签
         while self.tags_layout.count():

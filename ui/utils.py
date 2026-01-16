@@ -1,6 +1,7 @@
 # ui/utils.py
 
 import os
+import base64
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtCore import Qt, QByteArray
 from PyQt5.QtGui import QPalette, QIcon, QPixmap, QPainter
@@ -319,6 +320,32 @@ def create_svg_icon(icon_name, color=None):
     icon = QIcon(pixmap)
     _icon_cache[cache_key] = icon
     return icon
+
+def create_svg_data_uri(icon_name, color=None):
+    """
+    创建 SVG 的数据 URI, 用于 QLabel 富文本中的 <img> 标签。
+    """
+    default_color = QApplication.palette().color(QPalette.WindowText).name()
+
+    if color:
+        render_color = color
+    else:
+        render_color = _icon_theme_colors.get(icon_name, default_color)
+
+    svg_data = ""
+    if icon_name in _system_icons:
+        svg_data = _system_icons[icon_name]
+
+    if not svg_data:
+        return ""
+
+    # 替换颜色
+    svg_data = svg_data.replace("currentColor", render_color)
+
+    # 转换为 Base64
+    encoded_svg = base64.b64encode(svg_data.encode('utf-8')).decode('utf-8')
+
+    return f"data:image/svg+xml;base64,{encoded_svg}"
 
 def create_clear_button_icon():
     """
