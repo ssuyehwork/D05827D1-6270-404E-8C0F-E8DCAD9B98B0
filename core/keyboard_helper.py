@@ -19,59 +19,85 @@ class HotkeyManager(QObject):
             'capslock': load_setting('hotkey_capslock', True),
             'backtick_backspace': load_setting('hotkey_backtick_backspace', True)
         }
+        # 使用更稳健的 add_hotkey 处理组合键, 避免与输入法冲突
+        self._hotkey_map = {
+            'shift_space': ('shift+space', self._handle_shift_space),
+            'ctrl_shift_space': ('ctrl+shift+space', self._handle_ctrl_shift_space)
+        }
+        # 低级 hook 只用于处理单键替换
         self.hook = None
 
+    def _handle_shift_space(self):
+        keyboard.send('shift+enter')
+
+    def _handle_ctrl_shift_space(self):
+        keyboard.send('ctrl+a')
+        time.sleep(0.01)
+        keyboard.send('delete')
+
     def start(self):
+        # 1. 注册组合键
+        for feature, (hotkey_str, callback) in self._hotkey_map.items():
+            if self.feature_enabled.get(feature):
+                try:
+                    keyboard.add_hotkey(hotkey_str, callback, suppress=True)
+                except Exception as e:
+                    # 在某些环境下可能会失败, 打印日志
+                    print(f"无法注册热键 {hotkey_str}: {e}")
+
+        # 2. 仅为单键替换启动低级 hook
         if self.hook is None:
             self.hook = keyboard.hook(self._key_handler, suppress=True)
 
     def stop(self):
+        # 1. 移除低级 hook
         if self.hook:
             keyboard.unhook(self.hook)
             self.hook = None
 
+        # 2. 清理所有已注册的组合键
+        for feature in self._hotkey_map:
+            hotkey_str, _ = self._hotkey_map[feature]
+            try:
+                keyboard.remove_hotkey(hotkey_str)
+            except KeyError:
+                pass
+
     def toggle_feature(self, feature, enabled):
-        if feature in self.feature_enabled:
-            self.feature_enabled[feature] = enabled
-            save_setting(f'hotkey_{feature}', enabled)
-            self.status_changed.emit(feature, enabled)
+        if feature not in self.feature_enabled:
+            return
+            
+        self.feature_enabled[feature] = enabled
+        save_setting(f'hotkey_{feature}', enabled)
+
+        # 对于组合键, 动态添加/移除
+        if feature in self._hotkey_map:
+            hotkey_str, callback = self._hotkey_map[feature]
+            try:
+                keyboard.remove_hotkey(hotkey_str)
+            except KeyError:
+                pass
+            
+            if enabled:
+                try:
+                    keyboard.add_hotkey(hotkey_str, callback, suppress=True)
+                except Exception as e:
+                    print(f"无法在切换时注册热键 {hotkey_str}: {e}")
+
+        # 对于使用 hook 的单键, 无需操作, _key_handler 会自动检查标志位
+        self.status_changed.emit(feature, enabled)
 
     def _key_handler(self, event):
+        # hook 处理器现在大大简化, 只处理单键替换, 不再干扰空格键
         if event.event_type != 'down':
             return True
-
-        # Shift + Space -> Shift + Enter
-        if (event.name == 'space' and 
-            keyboard.is_pressed('shift') and 
-            not keyboard.is_pressed('ctrl')):
-            
-            if not self.feature_enabled['shift_space']:
-                return True
-            
-            keyboard.send('shift+enter')
-            return False 
-
-        # Ctrl + Shift + Space -> Clear input
-        if (event.name == 'space' and 
-            keyboard.is_pressed('ctrl') and 
-            keyboard.is_pressed('shift')):
-            
-            if not self.feature_enabled['ctrl_shift_space']:
-                return True
-
-            keyboard.release('ctrl')
-            keyboard.release('shift')
-            keyboard.send('ctrl+a')
-            time.sleep(0.01)
-            keyboard.send('delete')
-            return False
 
         # CapsLock -> Enter
         if event.name == 'caps lock':
             if keyboard.is_pressed('shift') or keyboard.is_pressed('ctrl'):
                 return True
             
-            if not self.feature_enabled['capslock']:
+            if not self.feature_enabled.get('capslock'):
                 return True
 
             keyboard.send('enter')
@@ -82,7 +108,7 @@ class HotkeyManager(QObject):
             if keyboard.is_pressed('shift'):
                 return True
             
-            if not self.feature_enabled['backtick_backspace']:
+            if not self.feature_enabled.get('backtick_backspace'):
                 return True
             
             keyboard.send('backspace')
