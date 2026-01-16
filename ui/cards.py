@@ -83,11 +83,15 @@ class IdeaCard(QFrame):
         # 3. 底部区域
         bot_layout = QHBoxLayout()
         bot_layout.setSpacing(6)
+
+        self.time_icon = QLabel()
+        self.time_icon.setStyleSheet("background: transparent;")
         
         self.time_label = QLabel()
         self.time_label.setStyleSheet("color:rgba(255,255,255,100); font-size:12px; background:transparent;")
         self.time_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         
+        bot_layout.addWidget(self.time_icon)
         bot_layout.addWidget(self.time_label)
         bot_layout.addStretch() 
         
@@ -165,6 +169,7 @@ class IdeaCard(QFrame):
             self.content_layout.addWidget(content)
 
         # 时间 (带时钟符号)
+        self.time_icon.setPixmap(create_svg_icon("clock.svg", "rgba(255,255,255,100)").pixmap(12, 12))
         self.time_label.setText(f'{self.data["updated_at"][:16]}')
         
         # 标签
