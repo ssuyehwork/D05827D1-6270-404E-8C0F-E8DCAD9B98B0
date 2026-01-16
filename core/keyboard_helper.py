@@ -4,12 +4,15 @@ import time
 import keyboard
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QCheckBox)
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal
+from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QObject
 from PyQt5.QtGui import QPainter, QColor, QPainterPath
 from core.settings import load_setting, save_setting
 
-class HotkeyManager:
+class HotkeyManager(QObject):
+    status_changed = pyqtSignal(str, bool)
+    
     def __init__(self):
+        super().__init__()
         self.feature_enabled = {
             'shift_space': load_setting('hotkey_shift_space', True),
             'ctrl_shift_space': load_setting('hotkey_ctrl_shift_space', True),
@@ -31,6 +34,7 @@ class HotkeyManager:
         if feature in self.feature_enabled:
             self.feature_enabled[feature] = enabled
             save_setting(f'hotkey_{feature}', enabled)
+            self.status_changed.emit(feature, enabled)
 
     def _key_handler(self, event):
         if event.event_type != 'down':
